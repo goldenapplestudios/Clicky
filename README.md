@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Clicky.png" alt="Clicky" width="150">
+</p>
+
 # Clicky - If Claude were a Pentester
 
 A multi-agent penetration testing framework powered by Claude. Clicky orchestrates specialized agents to perform comprehensive security assessments using decision tree logic derived from pentesting research.
