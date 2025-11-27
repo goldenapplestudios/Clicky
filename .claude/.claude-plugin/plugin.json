@@ -1,0 +1,39 @@
+{
+  "name": "pentest-automation",
+  "version": "1.0.0",
+  "description": "Automated penetration testing framework using decision tree logic from HTB analysis",
+  "author": "Kali Jackson",
+  "repository": "https://github.com/goldenapplestudios/Clicky",
+  "main": "index.js",
+  "keywords": ["pentesting", "security", "automation", "hacking", "enumeration", "exploitation"],
+  "dependencies": {
+    "nmap": "latest",
+    "hydra": "latest",
+    "sqlmap": "latest",
+    "metasploit": "latest"
+  },
+  "permissions": [
+    "network-access",
+    "file-system",
+    "command-execution",
+    "agent-orchestration"
+  ],
+  "agents": [
+    "recon-agent",
+    "exploit-agent",
+    "privesc-agent",
+    "loot-agent",
+    "decision-agent"
+  ],
+  "commands": [
+    "pentest",
+    "quick-scan",
+    "exploit-service",
+    "privesc-check"
+  ],
+  "hooks": [
+    "session-start",
+    "pre-command",
+    "post-exploit"
+  ]
+}

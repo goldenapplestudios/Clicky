@@ -1,0 +1,115 @@
+{
+  "pentest": {
+    "default_mode": "normal",
+    "default_report_level": "standard",
+    "default_timeout": 600,
+    "output_directory": "./reports",
+    "auto_save_checkpoints": true,
+    "checkpoint_interval": 300,
+    "max_parallel_operations": 3,
+    "confirmation_required": false
+  },
+  "scanning": {
+    "default_ports": "1-65535",
+    "scan_speed": "normal",
+    "service_detection": true,
+    "os_detection": true,
+    "script_scanning": true,
+    "aggressive_mode": false
+  },
+  "exploitation": {
+    "max_attempts_per_service": 3,
+    "timeout_per_attempt": 300,
+    "credential_reuse": true,
+    "auto_stabilize_shell": true,
+    "persistence_installation": false,
+    "cleanup_on_exit": true
+  },
+  "agents": {
+    "recon": {
+      "model": "claude-3-haiku-20240307",
+      "temperature": 0.3,
+      "timeout": 180
+    },
+    "exploit": {
+      "model": "claude-3-haiku-20240307",
+      "temperature": 0.2,
+      "timeout": 300
+    },
+    "privesc": {
+      "model": "claude-3-haiku-20240307",
+      "temperature": 0.3,
+      "timeout": 600
+    },
+    "loot": {
+      "model": "claude-3-haiku-20240307",
+      "temperature": 0.2,
+      "timeout": 300
+    },
+    "decision": {
+      "model": "claude-3-sonnet-20240229",
+      "temperature": 0.4,
+      "timeout": 120
+    }
+  },
+  "reporting": {
+    "format": "json",
+    "include_timestamps": true,
+    "include_evidence": true,
+    "include_recommendations": true,
+    "sanitize_credentials": true,
+    "compress_large_files": true,
+    "auto_generate_executive_summary": true
+  },
+  "safety": {
+    "require_authorization": true,
+    "log_all_actions": true,
+    "rollback_on_failure": true,
+    "avoid_destructive_actions": true,
+    "respect_scope_boundaries": true,
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 60
+    }
+  },
+  "network": {
+    "proxy": null,
+    "timeout": 30,
+    "retry_attempts": 3,
+    "retry_delay": 5,
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+  },
+  "credentials": {
+    "default_wordlists": {
+      "usernames": "/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt",
+      "passwords": "/usr/share/wordlists/rockyou.txt"
+    },
+    "common_defaults": [
+      {"username": "admin", "password": "admin"},
+      {"username": "administrator", "password": "administrator"},
+      {"username": "root", "password": "root"},
+      {"username": "guest", "password": "guest"},
+      {"username": "test", "password": "test"}
+    ]
+  },
+  "database": {
+    "store_results": true,
+    "database_path": "./.claude/data/pentest.db",
+    "encryption": false
+  },
+  "logging": {
+    "level": "info",
+    "file": "./.claude/logs/pentest.log",
+    "console_output": true,
+    "rotate_size": "10MB",
+    "max_files": 5
+  },
+  "features": {
+    "auto_exploit": true,
+    "smart_enumeration": true,
+    "credential_harvesting": true,
+    "lateral_movement": true,
+    "persistence": false,
+    "anti_detection": false
+  }
+}

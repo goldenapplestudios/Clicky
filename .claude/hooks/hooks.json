@@ -1,0 +1,10 @@
+{
+  "Stop": {
+    "script": "~/.claude/skills/session-management/scripts/pentest-recovery-hook.sh",
+    "description": "Automated recovery handler for failed penetration testing attempts"
+  },
+  "PostToolUse": {
+    "script": "~/.claude/skills/session-management/scripts/state-persistence.sh record",
+    "description": "Records attack attempts for deduplication and analysis"
+  }
+}

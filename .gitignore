@@ -1,0 +1,61 @@
+# ===========================================
+# Pentester-Claude Security Gitignore
+# ===========================================
+
+# Credentials & Secrets
+.credentials.json
+*.credentials*
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Session Data (contains target info, hashes, recon data)
+sessions/
+
+# Command History & Logs
+*.jsonl
+history.jsonl
+shell-snapshots/
+
+# Analytics & Telemetry
+statsig/
+
+# Internal State & Cache
+todos/
+cache/
+*.cache
+*.sqlite
+
+# Claude Code Runtime Data (may contain sensitive pentest data)
+.claude/pentest-state/
+.claude/cache/
+.claude/logs/
+.claude/data/
+.claude/.credentials.json
+
+# Project-specific
+projects/
+
+# Common sensitive patterns
+*_password*
+*_secret*
+*.hash
+**/loot/
+**/creds/
+**/dumps/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.idea/
+.vscode/settings.json
