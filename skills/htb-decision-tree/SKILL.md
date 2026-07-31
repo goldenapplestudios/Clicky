@@ -83,16 +83,21 @@ Calculate attack success probability based on discovered services:
 
 ```bash
 # Run probability calculator
-scripts/success-calculator.sh analyze "{service_list}"
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/success-calculator.sh analyze "{service_list}"
+
+# Excluding services already attempted and failed:
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/success-calculator.sh --services "{service_list}" --attempts "{tried_ports}"
 
 # Example output:
 # {
-#   "ftp_anonymous": 0.73,
+#   "ftp": 0.73,
 #   "smb_null": 0.61,
 #   "web_sqli": 0.42,
-#   "overall_success": 0.89
+#   "overall_success": 0.94
 # }
 ```
+
+This is a mechanical combination of the Priority Matrix's per-service base rates — treat it as a starting estimate, not a substitute for judgment. Adjust it with anything learned in memory (per decision-agent's Memory Usage Policy) before relying on it.
 
 ## HTB Pattern Recognition
 
@@ -180,29 +185,33 @@ if "MongoDB" in services or "Redis" in services:
 ### Service Prioritizer
 ```bash
 # Analyze services and return priority order
-scripts/service-prioritizer.py --services "21,22,80,445" --target {ip}
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/service-prioritizer.py --services "21,22,80,445" --target {ip}
 ```
 
 ### Pattern Matcher
 ```bash
-# Match current scenario to HTB patterns
-scripts/pattern-matcher.py --profile "{services_json}" --difficulty "medium"
+# Match current scenario to HTB patterns (finding flags are optional - see
+# the script's own docstring for the full list; omitted flags are reported
+# as untested candidates rather than assumed false)
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/pattern-matcher.py --profile '{"ftp_anonymous": true, "sqli_found": false}' --difficulty "medium"
 ```
 
 ### Success Calculator
 ```bash
 # Calculate success probabilities
-scripts/success-calculator.sh --services "{service_list}" --attempts "{tried_exploits}"
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/success-calculator.sh --services "{service_list}" --attempts "{tried_exploits}"
 ```
 
 ## Integration Instructions
 
 When analyzing scan results:
-1. Execute service-prioritizer.py with discovered ports
+1. Execute `service-prioritizer.py` with discovered ports to get the recommended attack sequence
 2. Follow the recommended attack sequence
-3. Track attempted exploits for probability updates
-4. Use pattern-matcher.py to identify similar HTB machines
+3. Track attempted exploits (via the session's trace log — see `docs/observability.md`) so `success-calculator.sh`'s `--attempts` exclusion and the Failure Recovery Patterns below can avoid repeating a known-failed technique
+4. Use `pattern-matcher.py` to identify which HTB difficulty pattern the target resembles as findings come in
 5. Adjust strategy based on failure recovery patterns
+
+All three scripts are mechanical helpers over the tables in this skill — the decision-agent should still apply judgment (and anything learned in memory, per its Memory Usage Policy) rather than following their output blindly.
 
 ## Performance Metrics
 

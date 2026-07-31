@@ -60,6 +60,27 @@ sslscan target.com
 testssl.sh target.com
 ```
 
+### Subdomain Takeover
+
+After subdomain enumeration, check whether any discovered subdomain's CNAME points at a deprovisioned cloud resource that can be claimed — a core step in Jason Haddix's Bug Hunter's Methodology recon flow that's easy to skip after just running discovery tools.
+
+```bash
+# Automated takeover scanning
+subjack -w subdomains.txt -t 100 -timeout 30 -o takeovers.txt -ssl
+nuclei -l subdomains.txt -t subdomain-takeover/
+
+# Manual check pattern: does the CNAME resolve, but the target service say
+# "not found" / "no such app" instead of serving real content?
+dig CNAME sub.target.com +short
+curl -s "https://sub.target.com" | grep -iE "no such app|not found|domain not configured|there isn't a github pages site here|unknown s3 bucket"
+
+# Common vulnerable CNAME targets (non-exhaustive - check current fingerprint
+# lists like https://github.com/EdOverflow/can-i-take-over-xyz for the latest):
+# *.s3.amazonaws.com, *.herokuapp.com, *.github.io, *.azurewebsites.net,
+# *.cloudapp.net, *.blob.core.windows.net, *.trafficmanager.net,
+# *.wordpress.com, *.zendesk.com, *.shopify.com, *.fastly.net
+```
+
 ### WHOIS and ASN Information
 ```bash
 # WHOIS lookup
@@ -129,6 +150,23 @@ curl -s "http://archive.md/target.com"
 # Download index files
 aws s3 ls s3://commoncrawl/crawl-data/ --no-sign-request
 ```
+
+### Visual Triage
+
+Before manually reviewing individual hosts, screenshot every discovered subdomain/host in one pass — a standard step in Haddix's methodology that turns "hundreds of subdomains to check one by one" into "scan a contact sheet for login pages, admin panels, and anything unusual" in a few minutes.
+
+```bash
+# gowitness (fast, single Go binary)
+gowitness scan file -f subdomains.txt --write-db
+
+# aquatone (classic option, produces an HTML report)
+cat subdomains.txt | aquatone -out ./aquatone_results
+
+# eyewitness
+eyewitness --web -f subdomains.txt -d ./eyewitness_results
+```
+
+Review the resulting contact sheet for: login pages, admin/management interfaces, default install pages ("It works!", framework welcome pages — often mean unconfigured/forgotten hosts), error pages leaking a stack trace, and anything visually inconsistent with the rest of the target's hosts (a sign it's a different, possibly older or forgotten, application).
 
 ### Website Technology Stack
 ```bash

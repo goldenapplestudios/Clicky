@@ -9,6 +9,10 @@ allowed-tools: Bash, Read, Write, Grep, WebFetch
 ## Purpose
 Provides comprehensive container and Kubernetes security testing techniques, including container escape methods, vulnerability assessment, and cloud-native exploitation strategies.
 
+## Sandboxing Note
+
+If you're running Claude Code's sandboxed Bash tool for this engagement (see `docs/sandboxing.md`), `docker` is entirely incompatible with it - confirmed in Claude Code's own troubleshooting docs. This skill's Docker API/escape checks need a `sandbox.excludedCommands: ["docker *"]` carve-out to function at all, which means **this testing runs fully unsandboxed** whenever that exclusion is active, regardless of what the rest of the session's sandbox policy says. That's a deliberate, scoped trade-off documented in `docs/sandboxing.md`, not an oversight - if full sandboxing is a hard requirement for the engagement, run container-security testing in a separate, explicitly-unsandboxed, extra-scrutiny session instead.
+
 ## Container Detection
 
 ### Identify Container Environment

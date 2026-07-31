@@ -14,13 +14,13 @@ Provides comprehensive service enumeration techniques for detailed reconnaissanc
 ### Initial Service Identification
 ```bash
 # Quick service detection
-scripts/service-detector.sh --target {ip} --ports "{port_list}"
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/service-detector.sh --target {ip} --ports "{port_list}"
 
 # Banner grabbing
-scripts/banner-grabber.py --target {ip} --port {port}
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/banner-grabber.py --target {ip} --port {port}
 
 # Version fingerprinting
-scripts/port-analyzer.sh --deep --target {ip}
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/port-analyzer.sh --deep --target {ip}
 ```
 
 ## Service-Specific Enumeration
@@ -307,17 +307,17 @@ snmpenum {target} public windows.txt
 ### Service Version Mapping
 ```bash
 # Create service version database
-scripts/port-analyzer.sh --export-versions > service_versions.json
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/port-analyzer.sh --export-versions > service_versions.json
 
 # Match against vulnerability database
-scripts/service-detector.sh --match-vulns service_versions.json
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/service-detector.sh --match-vulns service_versions.json
 ```
 
 ### Banner Analysis
 ```bash
 # Extract and analyze all banners
 for port in $(cat open_ports.txt); do
-    scripts/banner-grabber.py --target {target} --port $port >> banners.txt
+    ${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/banner-grabber.py --target {target} --port $port >> banners.txt
 done
 
 # Parse for versions
@@ -327,7 +327,7 @@ grep -oE "[0-9]+\.[0-9]+\.[0-9]+" banners.txt | sort -u
 ### Service Correlation
 ```bash
 # Correlate services for attack paths
-scripts/service-correlator.py --services "{service_list}"
+${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/service-correlator.py --services "{service_list}"
 
 # Example output:
 # Web + MySQL = SQL injection potential
@@ -359,17 +359,20 @@ scripts/service-correlator.py --services "{service_list}"
 ## Integration with Other Skills
 
 ### Session Management
+
+`$SESSION_ID` is set earlier in the workflow (`commands/pentest.md` Step 1 exports it) — use the value already in the environment.
+
 ```bash
 # Store enumeration results
-SESSION_ID=$(scripts/session-manager.sh current)
-scripts/state-persistence.sh record "$SESSION_ID" "services" "{service_name}" "{version_info}"
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "services" "{service_name}" "{version_info}" true
 ```
 
 ### Credential Testing
 ```bash
-# Test enumerated users
-USERS=$(cat enumerated_users.txt)
-scripts/credential-manager.sh spray --users "$USERS" --service {service}
+# Test enumerated users against a target's services (see credential-harvesting skill)
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh spray \
+  --target "{ip}" --services "{service},{service}"
 ```
 
 ## Output Format

