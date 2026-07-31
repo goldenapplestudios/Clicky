@@ -24,6 +24,12 @@
       "default": "/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt",
       "required": false
     },
+    "default_web_wordlist_dir": {
+      "type": "directory",
+      "title": "Default web content wordlist directory",
+      "description": "Root of a SecLists-style wordlist collection used by the fuzzing skill for directory/vhost/parameter wordlists when no engagement-specific list is supplied. Distinct from default_password_wordlist/default_username_wordlist, which are hydra/hashcat credential lists, not web-content wordlists. Falls back to the plugin's small bundled wordlists in skills/fuzzing/assets/wordlists/ if unset.",
+      "required": false
+    },
     "max_parallel_operations": {
       "type": "number",
       "title": "Max parallel operations",

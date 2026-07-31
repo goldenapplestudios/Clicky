@@ -16,6 +16,8 @@ mindmap
       service-enumeration
       osint-gathering
       target-validation
+      fuzzing
+      web-crawling
     White-Box Analysis
       source-code-analysis
     Exploitation
@@ -102,6 +104,14 @@ Target verification and scope checking.
 - Domain resolution
 - Liveness check (ping, TCP)
 - Scope boundary enforcement
+
+### fuzzing
+
+Directory/vhost/parameter fuzzing with a tool-preference cascade (ffuf -> feroxbuster -> gobuster -> dirb -> wfuzz -> curl fallback). Consolidates what used to be scattered ffuf/gobuster mentions across `recon-agent`, `web-vulnerability-testing`, and `api-security-testing` into one script with real response filtering, recursive/vhost fuzzing, and `--auth-file` support for targets behind a login wall. See `skills/fuzzing/SKILL.md`.
+
+### web-crawling
+
+JS-aware endpoint discovery via katana (preferred) -> hakrawler -> stdlib-only static HTML link extraction. Closes the gap left by fixed-endpoint-path probing against modern SPA targets that only expose routes via client-side JavaScript/XHR. See `skills/web-crawling/SKILL.md`.
 
 ---
 

@@ -79,13 +79,26 @@ test_graphql() {
 }
 
 # Function to test REST API vulnerabilities
+#
+# Optional 3rd arg: a skills/web-crawling crawl_results.json file. When
+# given, its discovered endpoint paths are tested alongside the fixed list
+# below rather than instead of it - omitting this arg reproduces the
+# original fixed-list-only behavior exactly.
 test_rest_api() {
     local base_url="$1"
+    local crawled_endpoints_file="${2:-}"
 
     echo -e "${YELLOW}[*] Testing REST API...${NC}"
 
     # Test for common endpoints
     local endpoints=("/users" "/admin" "/api/v1/users" "/api/v2/users" "/debug" "/metrics" "/health" "/swagger" "/api-docs")
+
+    if [ -n "$crawled_endpoints_file" ] && [ -f "$crawled_endpoints_file" ] && command -v jq >/dev/null 2>&1; then
+        while IFS= read -r crawled_path; do
+            [ -n "$crawled_path" ] && endpoints+=("$crawled_path")
+        done < <(jq -r --arg base "$base_url" '.endpoints[]?.url | if startswith($base) then .[($base | length):] else empty end' "$crawled_endpoints_file" 2>/dev/null)
+        echo "  Merged in $(jq '.endpoints | length' "$crawled_endpoints_file" 2>/dev/null || echo 0) crawled endpoint(s) from $crawled_endpoints_file"
+    fi
 
     for endpoint in "${endpoints[@]}"; do
         response_code=$(curl -s -o /dev/null -w "%{http_code}" "$base_url$endpoint")
@@ -249,9 +262,10 @@ EOF
 main() {
     local target="${1:-}"
     local output_dir="${2:-.}"
+    local crawled_endpoints_file="${3:-}"
 
     if [ -z "$target" ]; then
-        echo "Usage: $0 <target> [output_dir]"
+        echo "Usage: $0 <target> [output_dir] [crawled_endpoints.json]"
         echo ""
         echo "Example:"
         echo "  $0 https://api.example.com ./results/"
@@ -270,7 +284,7 @@ main() {
     fi
 
     # Test REST API
-    test_rest_api "$target"
+    test_rest_api "$target" "$crawled_endpoints_file"
 
     # Test common vulnerabilities
     test_cors "$target"

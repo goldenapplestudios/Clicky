@@ -4,7 +4,7 @@ description: Performs reconnaissance and enumeration of target systems including
 model: inherit
 color: blue
 tools: Bash, Grep, Read, WebFetch
-skills: nmap-scanning, service-enumeration, osint-gathering, web-vulnerability-testing, target-validation, web-auth-capture, session-management
+skills: nmap-scanning, service-enumeration, osint-gathering, web-vulnerability-testing, target-validation, web-auth-capture, fuzzing, web-crawling, session-management
 ---
 
 # Recon Agent - Target Enumeration Specialist
@@ -196,29 +196,31 @@ crackmapexec smb {target_IP} -u '' -p ''
 # Technology detection (with alternatives)
 whatweb {target_IP} || wappalyzer || curl -I {target_IP}
 
-# Directory enumeration (tool cascade)
-if command -v gobuster &> /dev/null; then
-    gobuster dir -u http://{target_IP} -w /usr/share/wordlists/dirb/common.txt
-elif command -v feroxbuster &> /dev/null; then
-    feroxbuster --url http://{target_IP} --wordlist /usr/share/wordlists/dirb/common.txt
-elif command -v dirb &> /dev/null; then
-    dirb http://{target_IP} /usr/share/wordlists/dirb/common.txt
-elif command -v wfuzz &> /dev/null; then
-    wfuzz -c -z file,/usr/share/wordlists/dirb/common.txt --hc 404 http://{target_IP}/FUZZ
-else
-    # Manual enumeration with curl
-    for word in $(cat /usr/share/wordlists/dirb/common.txt); do
-        curl -s -o /dev/null -w "%{http_code}" http://{target_IP}/$word | grep -v 404
-    done
-fi
+# Directory enumeration - delegates to the fuzzing skill's own tool
+# cascade (ffuf/feroxbuster/gobuster/dirb/wfuzz/curl, whichever is
+# installed) instead of a single hardcoded tool+wordlist
+${CLAUDE_PLUGIN_ROOT}/skills/fuzzing/scripts/fuzz.sh dir --url "http://{target_IP}" \
+  --output "$SESSION_DIR/recon/fuzz_dir_{target_IP}.json"
+
+# Virtual host / subdomain enumeration - not previously a first-class step
+${CLAUDE_PLUGIN_ROOT}/skills/fuzzing/scripts/fuzz.sh vhost --url "http://{target_IP}" --domain "{target_domain}" \
+  --output "$SESSION_DIR/recon/fuzz_vhost_{target_IP}.json"
 
 # Check for common files (always available with curl/wget)
 curl http://{target_IP}/robots.txt || wget -q -O - http://{target_IP}/robots.txt
 curl http://{target_IP}/.git/config || wget -q -O - http://{target_IP}/.git/config
 curl http://{target_IP}/.env || wget -q -O - http://{target_IP}/.env
+
+# JS-aware crawling - finds routes a fixed-path probe list or static
+# directory fuzz can't (client-side-routed pages, XHR/fetch-only API
+# calls). See skills/web-crawling.
+${CLAUDE_PLUGIN_ROOT}/skills/web-crawling/scripts/crawl.sh crawl --url "http://{target_IP}" \
+  --output "$SESSION_DIR/recon/crawl_{target_IP}.json"
 ```
 
 If `.git/config` returns real content (not a 404/blank), set `git_exposure_detected: true` in your output - this opportunistically triggers `source-analyzer-agent` (see `commands/pentest.md`) to pull and analyze the exposed source, at essentially zero extra recon cost since this probe already runs. Don't attempt the source acquisition/analysis yourself - that's a distinct agent with its own skill (`source-code-analysis`).
+
+If the target requires authentication to see anything interesting, use `skills/web-auth-capture` first and pass the resulting `--auth-file` to both `fuzz.sh` and `crawl.sh` above - otherwise everything behind the login wall just reads as a wall of 401/403s.
 
 #### For SSH (Port 22):
 ```bash
@@ -295,6 +297,9 @@ Return a structured JSON report with MITRE ATT&CK mapping:
     "documentation_found": false,
     "mitre_attack": ["T1106 - API Abuse"]
   },
+  "crawled_endpoints": [
+    {"url": "http://10.10.10.10/api/users", "method": "GET", "source": "xhr"}
+  ],
   "recommendations": [
     {
       "priority": "HIGH",

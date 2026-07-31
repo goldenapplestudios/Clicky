@@ -472,16 +472,10 @@ grpcurl -plaintext \
 ## API Fuzzing
 
 ### Parameter Fuzzing
-```bash
-# Use ffuf for API fuzzing
-ffuf -w params.txt -u "{target}/api/endpoint?FUZZ=test" \
-  -H "Authorization: Bearer {token}"
 
-# POST data fuzzing
-ffuf -w values.txt -X POST \
-  -u "{target}/api/endpoint" \
-  -d '{"param": "FUZZ"}' \
-  -H "Content-Type: application/json"
+Full tool cascade, baseline-comparison hit detection, and `--auth-file` support now live in `skills/fuzzing` (used by `exploit-agent` for authenticated parameter discovery):
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/fuzzing/scripts/fuzz.sh param --url "{target}/api/endpoint?x=1" --auth-file "$AUTH_FILE" --output <json>
 ```
 
 ### Content Type Testing
