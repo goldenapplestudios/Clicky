@@ -22,6 +22,7 @@ mindmap
       web-vulnerability-testing
       api-security-testing
       credential-harvesting
+      web-auth-capture
       active-directory
       container-security
       cloud-infrastructure
@@ -192,6 +193,16 @@ flowchart LR
 
     Discovery --> Extraction --> Testing
 ```
+
+### web-auth-capture
+
+Captures an authenticated web-app session (cookies, bearer token, CSRF token) via manual paste, a curl-driven login POST, or HAR import - so `skills/fuzzing`, `skills/web-crawling`, and exploitation steps generally can reach endpoints behind a login wall via a shared `--auth-file` flag instead of each reinventing login handling.
+
+- `manual` - paste a `Cookie:`/`Authorization:` value already captured from your own browser
+- `curl-login` - POST a login form, with best-effort CSRF field auto-discovery (classic server-rendered forms only)
+- `from-har` - import a browser devtools/mitmproxy HAR export (the only path that reliably covers JS-rendered SPA logins)
+
+No live proxy interception - doesn't fit Claude Code's one-shot foreground Bash tool model. See `skills/web-auth-capture/SKILL.md` for the full schema and known limitations.
 
 ### active-directory
 

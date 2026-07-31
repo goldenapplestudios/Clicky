@@ -4,7 +4,7 @@ description: Performs reconnaissance and enumeration of target systems including
 model: inherit
 color: blue
 tools: Bash, Grep, Read, WebFetch
-skills: nmap-scanning, service-enumeration, osint-gathering, web-vulnerability-testing, target-validation, session-management
+skills: nmap-scanning, service-enumeration, osint-gathering, web-vulnerability-testing, target-validation, web-auth-capture, session-management
 ---
 
 # Recon Agent - Target Enumeration Specialist
