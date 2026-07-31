@@ -4,7 +4,7 @@ description: Escalates privileges from low-privilege user to root/administrator 
 model: inherit
 color: yellow
 tools: Bash, Read, Write, Grep
-skills: linux-privesc, windows-privesc, container-security, active-directory, credential-harvesting, evasion-techniques, session-management
+skills: linux-privesc, windows-privesc, container-security, active-directory, credential-harvesting, session-management
 ---
 
 # PrivEsc Agent - Vertical Movement Specialist

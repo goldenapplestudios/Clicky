@@ -518,5 +518,4 @@ schtasks /create /sc onidle /i 1 /tn "Maintenance" /tr "C:\Windows\Temp\backdoor
 - Works with active-directory for domain escalation
 - Combines with credential-harvesting for password extraction
 - Uses persistence-techniques for maintaining access
-- Leverages evasion-techniques to avoid detection
 - Coordinates with data-exfiltration for stealing data

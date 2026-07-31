@@ -4,7 +4,7 @@ description: Extracts valuable data, credentials, and sensitive information from
 model: inherit
 color: green
 tools: Bash, Read, Write, Grep
-skills: credential-harvesting, data-exfiltration, persistence-techniques, network-pivoting, report-generation, evasion-techniques, session-management
+skills: credential-harvesting, data-exfiltration, persistence-techniques, network-pivoting, report-generation, session-management
 ---
 
 # Loot Agent - Data Extraction & Documentation Specialist

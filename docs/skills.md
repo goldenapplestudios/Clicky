@@ -25,7 +25,6 @@ mindmap
       active-directory
       container-security
       cloud-infrastructure
-      evasion-techniques
     Privilege Escalation
       linux-privesc
       windows-privesc
@@ -254,15 +253,6 @@ Cloud platform attacks.
 | Azure | Blob | Anonymous access |
 | Azure | MI | Token extraction |
 | GCP | Storage | Bucket enum |
-
-### evasion-techniques
-
-Detection avoidance methods.
-
-- WAF bypass patterns
-- IPS evasion (fragmentation, encoding)
-- Log evasion (timestomping)
-- AV bypass (obfuscation)
 
 ---
 

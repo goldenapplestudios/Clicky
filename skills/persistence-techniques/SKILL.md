@@ -665,7 +665,6 @@ timestomp.exe backdoor.exe -m "01/01/2022 12:00:00"
 ## Integration Notes
 
 - Critical for maintaining access during long engagements
-- Works with evasion-techniques to avoid detection
 - Coordinates with C2 infrastructure for callbacks
 - Essential for data-exfiltration over time
 - Required for demonstrating impact in reports
