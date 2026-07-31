@@ -499,6 +499,27 @@ qpdf --encrypt {password} {password} 256 -- report.pdf encrypted_report.pdf
 7z a -p{password} -mhe report.7z report.pdf evidence/
 ```
 
+## Interop Export Formats (SARIF / SBOM)
+
+Separate from this skill's human-facing narrative report - these are for CI/tooling consumers, not readers:
+
+```bash
+# SARIF 2.1.0 - reads $SESSION_DIR/recon/source_findings.json (from
+# skills/source-code-analysis, either scanner path)
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/interop-formats.sh sarif \
+  --session-id "$SESSION_ID" --output "$SESSION_DIR/reports/findings.sarif.json"
+
+# CycloneDX 1.5 - reads $SESSION_DIR/recon/dependency_findings.json.
+# Deliberately named "sbom-partial", not "sbom": dependency-scanner.sh's
+# upstream tools only ever report packages with a known vulnerability, so
+# this is a vulnerability-derived partial component list, not a true
+# software inventory - don't present it as a complete SBOM.
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/interop-formats.sh sbom-partial \
+  --session-id "$SESSION_ID" --output "$SESSION_DIR/reports/sbom-partial.cdx.json"
+```
+
+Both converters (`sarif_convert.py`, `cyclonedx_convert.py`) were validated during development against the real, published SARIF 2.1.0 and CycloneDX 1.5 JSON Schemas, not eyeballed - see their header comments. Both require `source-analyzer-agent` to have run first (white-box analysis), since they convert its output rather than anything black-box testing produces.
+
 ## Best Practices
 
 1. **Always validate findings** before including in report

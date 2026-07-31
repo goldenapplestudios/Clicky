@@ -445,6 +445,11 @@ Output and documentation.
 - CIS Benchmark references
 - MITRE ATT&CK techniques
 
+**Interop Export Formats** (`interop-formats.sh`, separate from the narrative report above - for CI/tooling consumers):
+- SARIF 2.1.0 (from source-code-analysis's source findings)
+- CycloneDX 1.5 `sbom-partial` (from dependency findings - named "partial" deliberately, since it's vulnerability-derived, not a full inventory)
+- Both validated during development against the real published JSON Schemas
+
 ---
 
 ## Skill Directory Structure
