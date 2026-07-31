@@ -1,6 +1,6 @@
 # Clicky Workflow
 
-> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [README](../README.md)
+> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [Observability](observability.md) | [Sandboxing](sandboxing.md) | [README](../README.md)
 
 ---
 
@@ -96,6 +96,20 @@ flowchart TB
 | 5 | Loot | 3-5 minutes | Extract data |
 | 6 | Decision | 2 minutes | Generate report |
 | **Total** | - | **18-36 minutes** | Complete assessment |
+
+### Two Entry Points: `/pentest` vs `/pentest-parallel`
+
+Everything above describes `/pentest` (`commands/pentest.md`): each phase runs to completion before the next starts, and independent checks within Phase 3 (FTP, SMB, HTTP, other default-credential services) are tested one at a time in HTB priority order. There's also `/clicky:pentest-parallel` (`workflows/pentest-parallel.js`), a dynamic-workflow alternative that runs the same overall sequence but fans those independent Phase 3 (and Phase 5-adjacent modern-infrastructure) checks out concurrently instead of one at a time. They are genuinely different tools with different guarantees, not two implementations of the same thing:
+
+| | `/clicky:pentest` | `/clicky:pentest-parallel` |
+|---|---|---|
+| Independent service checks | Sequential, fixed HTB order | Concurrent |
+| Pause for confirmation before exploitation | Yes, if `require_confirmation_before_exploitation` is set | **No** — a running workflow can't pause for mid-run input |
+| Availability | Works everywhere Clicky installs | Requires Claude Code v2.1.154+ and a paid plan (or direct API/Bedrock/Vertex/Foundry access) |
+| Argument passing | Deterministic (`target`, `context` positional arguments) | Freeform, interpreted by Claude at invocation time |
+| Progress inspection | Read the transcript as it runs | `/workflows` shows per-stage timing and lets you pause/resume |
+
+Default to `/clicky:pentest`. Reach for `/clicky:pentest-parallel` when you specifically want the speed of concurrent checks and don't need the confirmation gate.
 
 ---
 
@@ -1162,3 +1176,33 @@ sequenceDiagram
 
     Note over O: Resumes privilege escalation<br/>(not starting over from recon)
 ```
+
+---
+
+## Experimental / Future: Adversarial Finding Verification with Agent Teams
+
+**Superseded for the core use case.** The specific problem this section was written for — a candidate finding getting independently challenged before it reaches a client — is now shipped and stable: `agents/verification-agent.md` (Tier 2 of a two-tier pipeline, alongside the Tier 1 mechanical cross-check in `skills/session-management/scripts/finding-validator.sh`), wired into `commands/pentest.md` Step 9.5 and mirrored as the `verification` stage in `workflows/pentest-parallel.js`. It uses ordinary sequential Task/`agent()` calls, not the experimental Agent Teams feature described below, which stays parked for the reasons this section already gives. Revisit Agent Teams only if a use case shows up that genuinely needs live peer debate rather than one independent reviewer pass — verification-agent's single-pass review has been sufficient for the finding-validation problem itself.
+
+**Not built. Not scheduled beyond that.** This remains a documented, ready-to-activate recipe for a *different* pattern (adversarial peer debate) — nothing here changes today's behavior.
+
+Claude Code has an experimental "agent teams" feature: multiple independent sessions that message each other directly and coordinate through a shared task list, rather than one agent delegating to workers and getting summaries back. It's explicitly recommended for peer debate and adversarial review, not for sequential pipelines — which describes almost all of Clicky's own flow, so it doesn't fit the core recon → decision → exploit → privesc → loot sequence. It fits exactly one place: right before Phase 6 (Reporting), when a candidate finding has been identified and it would be worth having it independently challenged before it goes in front of a client.
+
+### Why this, and why not yet
+
+- It's gated behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, off by default, with documented instability (session resumption doesn't carry teammates over, task status can lag).
+- It's architecturally unreachable from `/clicky:pentest-parallel` — the dynamic-workflow runtime has no team-spawning primitive, only `agent()`, `pipeline()`, `parallel()`, and `phase()`. It could only ever be wired into the prose `/clicky:pentest` path.
+- When an existing agent definition (like `decision-agent`) is used to spawn a teammate, that definition's `skills:` and `mcpServers:` frontmatter are dropped — the teammate loads skills the way an ordinary session would instead. Worth knowing before assuming a teammate would behave identically to the real subagent.
+- One narrow use case doesn't currently justify the added token cost and coordination overhead in an otherwise linear pipeline.
+
+### The recipe, if/when this gets built
+
+Right before compiling the final report, for a candidate finding worth double-checking:
+
+1. Enable agent teams for the session (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`).
+2. Spawn two teammates, both reusing the `decision-agent` definition, with opposing framings:
+   - **Teammate A** ("confirm"): "Confirm this finding is exploitable and reproducible. Try to reproduce it independently."
+   - **Teammate B** ("disprove"): "Actively try to disprove this finding — look for why it might be a false positive, already mitigated, or not actually exploitable in this environment."
+3. Let them message each other and argue, mirroring the "competing hypotheses" debugging pattern Claude Code's own docs recommend for this feature.
+4. The main session (acting as lead) synthesizes a verified verdict — confirmed, refuted, or inconclusive with reasoning — before the finding is written into the report.
+
+This directly reduces false positives reaching a client deliverable, which is the whole point of spending the extra tokens on it. Revisit once agent teams exits experimental status, or once a second concrete use case for peer-debate coordination shows up elsewhere in Clicky.
