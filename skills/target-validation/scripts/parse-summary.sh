@@ -55,6 +55,52 @@ extract_domain() {
         head -1
 }
 
+# Function to extract a scope.json path (for the scope-enforcement hook -
+# see skills/target-validation/SKILL.md)
+extract_scope() {
+    local summary="$1"
+
+    # Look for scope pattern, e.g. "scope: ./client-scope.json"
+    echo "$summary" | grep -oiE 'scope\s*:\s*[^,]+' | \
+        sed -E 's/scope\s*:\s*//i' | \
+        sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+        grep -v '^$' | \
+        head -1
+}
+
+# Function to extract a white-box source path (local checkout) - for
+# source-analyzer-agent (skills/source-code-analysis)
+extract_source_path() {
+    local summary="$1"
+
+    echo "$summary" | grep -oiE 'source\s*:\s*[^,]+' | \
+        sed -E 's/source\s*:\s*//i' | \
+        sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+        grep -v '^$' | \
+        head -1
+}
+
+# Function to extract a white-box repo URL - for source-analyzer-agent
+extract_repo_url() {
+    local summary="$1"
+
+    echo "$summary" | grep -oiE 'repo\s*:\s*[^,]+' | \
+        sed -E 's/repo\s*:\s*//i' | \
+        sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+        grep -v '^$' | \
+        head -1
+}
+
+# Function to detect the bare "whitebox" trigger keyword (no path/URL
+# needed - e.g. when source is already known to be at the default
+# location, or the operator just wants the .git-exposure opportunistic
+# trigger's threshold lowered)
+extract_whitebox_flag() {
+    local summary="$1"
+
+    echo "$summary" | grep -qiw "whitebox" && echo "true" || true
+}
+
 # Function to extract hints
 extract_hints() {
     local summary="$1"
@@ -166,6 +212,32 @@ parse_and_save() {
     if [ -n "$domain" ]; then
         echo "$domain" > "$output_dir/domain.txt"
         echo "[+] Domain extracted: $domain" >&2
+    fi
+
+    # Scope file path
+    local scope_path=$(extract_scope "$summary")
+    if [ -n "$scope_path" ]; then
+        echo "$scope_path" > "$output_dir/scope_path.txt"
+        echo "[+] Scope file path extracted: $scope_path" >&2
+    fi
+
+    # White-box trigger: source path, repo URL, or bare "whitebox" keyword
+    # (see agents/source-analyzer-agent.md)
+    local source_path=$(extract_source_path "$summary")
+    if [ -n "$source_path" ]; then
+        echo "$source_path" > "$output_dir/source_path.txt"
+        echo "[+] White-box source path extracted: $source_path" >&2
+    fi
+
+    local repo_url=$(extract_repo_url "$summary")
+    if [ -n "$repo_url" ]; then
+        echo "$repo_url" > "$output_dir/repo_url.txt"
+        echo "[+] White-box repo URL extracted: $repo_url" >&2
+    fi
+
+    if [ -n "$(extract_whitebox_flag "$summary")" ]; then
+        echo "true" > "$output_dir/whitebox_flag.txt"
+        echo "[+] White-box flag detected" >&2
     fi
 
     # Hints

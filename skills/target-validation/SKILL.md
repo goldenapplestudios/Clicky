@@ -14,7 +14,7 @@ Ensures targets are valid, within scope, and properly identified before penetrat
 ### Input Validation
 ```bash
 # Validate target format and scope
-scripts/validate-target.sh "{target}"
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/validate-target.sh "{target}"
 
 # Returns:
 # 0 - Valid target
@@ -52,7 +52,7 @@ api.example.com
 ### Platform Identification
 ```bash
 # Detect target environment type
-scripts/environment-detector.sh "{target}"
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/environment-detector.sh "{target}"
 
 # Detects:
 # - Cloud providers (AWS, Azure, GCP)
@@ -114,7 +114,7 @@ scripts/environment-detector.sh "{target}"
 ### Parse Additional Context
 ```bash
 # Parse user-provided context
-scripts/parse-summary.sh "{context_string}" "{output_dir}"
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/parse-summary.sh "{context_string}" "{output_dir}"
 
 # Extracts:
 # - Credentials: username:password pairs
@@ -174,14 +174,29 @@ scripts/parse-summary.sh "{context_string}" "{output_dir}"
 ### Scope Validation
 ```bash
 # Check if target is in scope
-scripts/scope-validator.sh --target "{ip}" --scope scope.json
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --target "{ip}" --scope scope.json
 
 # Validate technique
-scripts/scope-validator.sh --technique "dos" --scope scope.json
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --technique "dos" --scope scope.json
 
 # Check time restrictions
-scripts/scope-validator.sh --check-time --scope scope.json
+${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --check-time --scope scope.json
 ```
+
+### Automatic Scope Enforcement
+
+`scope-validator.sh` above is invoked automatically for every Bash and WebFetch tool call during a session, not just when an agent remembers to call it. `commands/pentest.md` Step 1 (and `workflows/pentest-parallel.js`'s init stage) resolve a `scope.json` for the engagement - first `./scope.json` in the operator's working directory, then a `scope: <path>` key in the `/pentest` context argument, then an auto-generated single-target scope if neither is provided - and write it to `$SESSION_DIR/scope.json`.
+
+From then on, `skills/target-validation/scripts/scope-enforcement-hook.sh` (a `PreToolUse` hook registered in `hooks/hooks.json` for the `Bash|WebFetch` matcher) runs before every such tool call:
+
+1. Extracts candidate targets from the command/URL via `scripts/extract-targets.py` (IPv4/CIDR, coarse IPv6, hostnames).
+2. Checks each candidate against `$SESSION_DIR/scope.json` using `scope-validator.sh` (same script as above, not duplicated logic).
+3. Maps the result to a permission decision: an explicitly excluded target is **denied** outright; a target that isn't listed either way triggers Claude Code's normal **confirmation prompt** (covers legitimate mid-engagement pivots to newly-discovered hosts); an explicitly in-scope target proceeds normally.
+4. If `scope.json` sets `authorized_techniques`, a small tool-name lookup (`sqlmap`→SQL injection, `hydra`/`medusa`→password attacks, etc.) also checks technique authorization. This is a best-effort MVP, not deep flag-level inference.
+
+This is on by default (`scope_enforcement` userConfig option, default `enforce`). Set it to `warn` to log would-be violations to `$SESSION_DIR/logs/scope-enforcement.log` without blocking, or `off` to disable the hook. The hook fails open (allows the call through) on any internal error - missing `jq`/`python3`, a malformed `scope.json` - rather than risk locking an operator out of an authorized engagement; check that log file if scope enforcement seems to be silently doing nothing.
+
+This hook is defense-in-depth, not a substitute for the explicit "Verify target is in scope" check agents (e.g. `exploit-agent`) already do before exploitation - regex-based command parsing has real blind spots (obfuscation, indirect variable references), and the technique check only recognizes a small set of common tool names.
 
 ## Network Information Gathering
 
@@ -258,7 +273,7 @@ nc -zv {target} 21 22 23 25 80 443 445 3306 3389
 1. **Format Validation**
    ```bash
    # Check if input is valid IP/hostname
-   scripts/validate-target.sh "{input}"
+   ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/validate-target.sh "{input}"
    ```
 
 2. **DNS Resolution**
@@ -270,19 +285,19 @@ nc -zv {target} 21 22 23 25 80 443 445 3306 3389
 3. **Scope Check**
    ```bash
    # Verify target is in scope
-   scripts/scope-validator.sh --target {ip}
+   ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --target {ip} --scope {scope.json}
    ```
 
 4. **Environment Detection**
    ```bash
    # Identify target environment
-   scripts/environment-detector.sh {ip}
+   ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/environment-detector.sh {ip}
    ```
 
 5. **Context Integration**
    ```bash
    # Parse any additional context
-   scripts/parse-summary.sh "{context}"
+   ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/parse-summary.sh "{context}"
    ```
 
 6. **Connectivity Verification**
@@ -293,12 +308,14 @@ nc -zv {target} 21 22 23 25 80 443 445 3306 3389
 
 ## Integration with Session Management
 
+`$SESSION_ID` is set earlier in the workflow (`commands/pentest.md` Step 1 exports it) — use the value already in the environment.
+
 ```bash
 # Store validation results in session
-SESSION_ID=$(scripts/session-manager.sh current)
-scripts/state-persistence.sh record "$SESSION_ID" "target_validation" "status" "validated"
-scripts/state-persistence.sh record "$SESSION_ID" "target_validation" "environment" "{env_type}"
-scripts/state-persistence.sh record "$SESSION_ID" "target_validation" "scope" "in_scope"
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "target_validation" "status" "validated" true
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "target_validation" "environment" "{env_type}" true
 ```
 
 ## Error Handling
