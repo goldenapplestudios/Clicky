@@ -1,6 +1,6 @@
 # Clicky Skills
 
-> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [README](../README.md)
+> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [Observability](observability.md) | [Sandboxing](sandboxing.md) | [README](../README.md)
 
 ---
 
@@ -16,6 +16,8 @@ mindmap
       service-enumeration
       osint-gathering
       target-validation
+    White-Box Analysis
+      source-code-analysis
     Exploitation
       web-vulnerability-testing
       api-security-testing
@@ -103,6 +105,22 @@ Target verification and scope checking.
 
 ---
 
+## White-Box Analysis Skills
+
+### source-code-analysis
+
+Used by `source-analyzer-agent` (see [Agents](agents.md#source-analyzer-agent)) when white-box analysis is requested or triggered by an exposed `.git` directory. A different input shape than the black-box skills above - file/line/sink findings, not ports/services - fed to `decision-agent` as a parallel input.
+
+| Script | Purpose |
+|--------|---------|
+| `source-scanner.sh acquire` | Local path, `git clone`, or reconstruction from an exposed `.git` (falls back to git-dumper/GitTools) |
+| `source-scanner.sh scan` | Regex/proximity taint-style scan: SQLi, command/code injection, XSS, path traversal, SSRF, hardcoded secrets |
+| `dependency-scanner.sh` | Wraps `trivy fs` (preferred) or per-ecosystem tools (`npm audit`, `pip-audit`, `bundler-audit`, `govulncheck`) for known-CVE dependencies |
+
+Findings carry a `confidence` of `high` (source and sink both matched) or `low` (sink only, no clear source in range) - report accordingly, never as confirmed. A manifest with no matching scanner installed is reported as "could not check" (`skipped`), never as "no vulnerabilities found." See `docs/workflow.md` for how these findings flow through the same Tier 1/Tier 2 validation pipeline as any other claimed finding once `exploit-agent` acts on them.
+
+---
+
 ## Exploitation Skills
 
 ### web-vulnerability-testing
@@ -145,7 +163,7 @@ API attack techniques.
 | JWT | Token analysis | Algorithm confusion |
 | OAuth | Flow analysis | Token theft |
 
-**MITRE Techniques**: T1106, T1550.001, T1499, T1090
+**MITRE Techniques**: T1550.001 (JWT/token theft). Most API-specific vulnerability classes (IDOR, mass assignment, CORS, SSRF) don't have clean MITRE ATT&CK mappings — ATT&CK models adversary behavior, not web-app vulnerability taxonomy. See the [OWASP API Security Top 10](skills.md#api-security-testing) mapping in `api-security-testing/SKILL.md` instead.
 
 ### credential-harvesting
 
@@ -415,10 +433,10 @@ Output and documentation.
 
 ## Skill Directory Structure
 
-Skills in Claude Code follow this directory structure within `.claude/skills/`:
+Skills in Claude Code follow this directory structure within `skills/`:
 
 ```text
-.claude/skills/{skill-name}/
+skills/{skill-name}/
 |-- SKILL.md           # Main skill definition (required)
 |-- scripts/           # Executable scripts
 |   |-- main.sh
@@ -451,5 +469,5 @@ The agent then has access to the skill's SKILL.md content and can execute script
 
 ```bash
 # Using a skill script
-.claude/skills/web-vulnerability-testing/scripts/sqli-test.sh http://target/login
+skills/web-vulnerability-testing/scripts/sqli-test.sh http://target/login
 ```

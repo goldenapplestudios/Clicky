@@ -1,6 +1,6 @@
 # Clicky Agents
 
-> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [README](../README.md)
+> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [Observability](observability.md) | [Sandboxing](sandboxing.md) | [README](../README.md)
 
 ---
 
@@ -13,7 +13,9 @@
 5. [Privesc Agent](#privesc-agent)
 6. [Loot Agent](#loot-agent)
 7. [Cloud Recon Agent](#cloud-recon-agent)
-8. [Agent Interaction Patterns](#agent-interaction-patterns)
+8. [Source Analyzer Agent](#source-analyzer-agent)
+9. [Verification Agent](#verification-agent)
+10. [Agent Interaction Patterns](#agent-interaction-patterns)
 
 ---
 
@@ -72,12 +74,25 @@ flowchart LR
         LOOT["Loot Agent"]
     end
 
+    subgraph WhiteBox["White-Box (parallel to Phase 1)"]
+        SRC["Source Analyzer Agent"]
+    end
+
+    subgraph Review["Phase 6: Validation"]
+        VERIFY["Verification Agent"]
+    end
+
+    SRC --> DECISION
     RECON --> DECISION
     CLOUD --> DECISION
     DECISION --> EXPLOIT
     EXPLOIT --> PRIVESC
     PRIVESC --> LOOT
     EXPLOIT --> LOOT
+    EXPLOIT --> VERIFY
+    PRIVESC --> VERIFY
+    LOOT --> VERIFY
+    CLOUD --> VERIFY
 ```
 
 ---
@@ -283,6 +298,14 @@ The Decision Agent is the **strategist**. It takes reconnaissance data and creat
 - What should we attack first?
 - What techniques should we use?
 - What do we do if an attack fails?
+
+### Persistent Memory
+
+Decision Agent is the only agent with persistent memory (`memory: user` in its frontmatter, scoped to the operator rather than any one target or working directory). It's the natural place for this: it's analysis-only by charter — it never runs exploitation commands or handles raw credentials/loot directly, just summarized service and vulnerability data it's handed — so it's the agent least likely to accidentally conflate a generalizable lesson with a target's actual secrets.
+
+Its memory is meant for *generalized* technique-effectiveness learning across engagements ("SMB null session succeeded against Samba 4.x in 6/8 observed engagements") — never for anything target-identifying (IPs, hostnames, credentials, client details). The agent's own frontmatter documents this boundary explicitly and is instructed to consult memory before analysis and update it after. Over time this is meant to let the static HTB decision tree below get refined by real, observed outcomes rather than staying frozen at its original one-time analysis.
+
+The other five agents don't have persistent memory yet — they handle credentials, hostnames, and loot as their normal job, which makes the same safe/never-store boundary much easier to get wrong. Extending memory to them is a deliberate future decision, not an oversight.
 
 ### The Decision Tree
 
@@ -1138,6 +1161,79 @@ curl -k -H "Authorization: Bearer $TOKEN" $APISERVER/api/v1/namespaces/default/p
 # List secrets (high value!)
 curl -k -H "Authorization: Bearer $TOKEN" $APISERVER/api/v1/namespaces/default/secrets
 ```
+
+---
+
+## Source Analyzer Agent
+
+### Purpose
+
+The Source Analyzer Agent is Clicky's white-box counterpart to the black-box `recon-agent`/`exploit-agent` pair: instead of probing a live target blind, it reads the target's actual source first and turns what it finds into targeted, prioritized attack vectors - a known sink beats a black-box guess. It never exploits anything itself; it reports file/line/sink-level findings for `exploit-agent` to act on.
+
+### When It Runs
+
+```mermaid
+flowchart TD
+    START["/pentest invocation"] --> EXPLICIT{"Context has<br/>whitebox/source/repo?"}
+    EXPLICIT -->|Yes| RUN["Launch source-analyzer-agent<br/>(parallel with recon-agent)"]
+    EXPLICIT -->|No| RECON["recon-agent runs its<br/>normal .git/config probe"]
+    RECON --> EXPOSED{"git_exposure_detected?"}
+    EXPOSED -->|true| SCOPE{"authorized_techniques<br/>non-empty?"}
+    EXPOSED -->|false| SKIP["No white-box analysis this run"]
+    SCOPE -->|check passes or empty| RUN2["Launch source-analyzer-agent<br/>(opportunistic)"]
+    SCOPE -->|denied| SKIP
+```
+
+Two trigger paths, never a blanket "always check" default: an explicit operator request (`whitebox`/`source: <path>`/`repo: <url>` in the `/pentest` context argument), or an opportunistic trigger off `recon-agent`'s existing `.git/config` probe - at essentially zero extra recon cost.
+
+### Analysis Pipeline
+
+1. **Acquire** - local path used in place, a git URL is cloned, or an exposed `.git` on a live target is dumped (`skills/source-code-analysis/scripts/source-scanner.sh`).
+2. **Taint-style scan** - regex/proximity-based source-to-sink mapping (untrusted input near a dangerous sink in the same file): SQLi, command/code injection, XSS, path traversal, SSRF, hardcoded secrets. Confidence is `high` (source and sink both found) or `low` (sink only) - never reported as more certain than that.
+3. **Dependency scan** - `trivy fs` (preferred) or per-ecosystem fallbacks (`npm audit`, `pip-audit`, etc.), flagging known-CVE dependencies.
+4. **Merge and map** - findings that can be tied to a live route/endpoint get `suggested_attack_vector.maps_to_service` populated, which is what lets `decision-agent` promote them above a black-box guess.
+
+### Hand-off, Not a Verdict
+
+Every source-derived finding is `confidence: "likely"` at best until confirmed live - `decision-agent` (Step 1.5) reads `source_findings.json` as a parallel input and promotes anything with a populated `maps_to_service` to the top of the attack sequence, but `exploit-agent` still has to confirm it against the real target, and the resulting claim flows through the same Verification Agent pipeline as any other finding (see below). A file-and-line hint is a strong lead, not a finished exploit.
+
+---
+
+## Verification Agent
+
+### Purpose
+
+Every other agent in the pipeline reports its own findings with nothing independently checking them - the single most common failure mode across AI pentesting tools generally: an agent honestly believes it succeeded but misread output, hit a false positive, or over-generalized. The Verification Agent is the check on that: an independent reviewer, modeled on the "independent reviewer" pattern used by leading AI pentesting frameworks, that judges whether one specific claimed finding is actually substantiated - and where safe, re-confirms it itself.
+
+### Two-Tier Validation
+
+```mermaid
+flowchart LR
+    FIND["Agent logs a finding<br/>via session-manager.sh log"] --> T1
+
+    subgraph T1["Tier 1 - always on, cheap"]
+        CHECK["finding-validator.sh:<br/>does evidence.command appear<br/>in the trace log, error-free?"]
+    end
+
+    T1 -->|pass / fail / no_evidence| GATE{"CRITICAL or HIGH,<br/>and not ruled out?"}
+    GATE -->|no| REPORT
+    GATE -->|yes, dedup by vuln class| T2
+
+    subgraph T2["Tier 2 - Verification Agent"]
+        RAW["Reads raw trace evidence only -<br/>NOT the original agent's confidence/narrative"]
+        REATTEMPT["Re-attempts a minimal repro<br/>if safe and idempotent"]
+        VERDICT["confirmed / refuted / inconclusive"]
+        RAW --> REATTEMPT --> VERDICT
+    end
+
+    T2 --> REPORT["report-generator.sh:<br/>Confirmed Findings vs.<br/>Unverified / Needs Manual Review"]
+```
+
+It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to `Bash, Read, Grep` - no `Write`, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
+
+### Why `inconclusive` Is a Real Answer
+
+The agent is explicitly instructed not to default to `confirmed` when in doubt: if a re-attempt isn't safe (destructive, non-idempotent, or access has since been lost), it says so rather than guessing. Any CRITICAL/HIGH finding that comes back `refuted`, or that Tier 1 flagged as `fail`, is a hard gate in `report-generator.sh validate` - it cannot appear in the report's "Confirmed Findings" section.
 
 ---
 

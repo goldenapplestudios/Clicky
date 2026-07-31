@@ -13,28 +13,50 @@ Clicky combines intelligent agent orchestration with attack methodologies derive
 ```mermaid
 flowchart LR
     A["/pentest"] --> B[Recon Agent]
-    B --> C[Decision Agent]
+    A -.->|whitebox/source/repo,<br/>or opportunistic .git exposure| S[Source Analyzer Agent]
+    S --> C[Decision Agent]
+    B --> C
     C --> D[Exploit Agent]
     D --> E[Privesc Agent]
     E --> F[Loot Agent]
-    F --> G[Report]
+    D --> V[Verification Agent]
+    E --> V
+    F --> V
+    V --> G[Report]
 
     D -.->|failure| C
     E -.->|failure| C
+```
+
+Every Bash/WebFetch call in between is checked against the engagement's `scope.json` by an always-on `PreToolUse` hook (see [Sandboxing](docs/sandboxing.md) for the opt-in OS-level layer on top).
+
+## Installation
+
+Clicky is a Claude Code plugin. Install it locally for development, or add it via its bundled marketplace:
+
+```bash
+# Local development: run from a clone of this repo
+claude --plugin-dir .
+
+# Or install via the marketplace this repo ships
+/plugin marketplace add goldenapplestudios/Clicky
+/plugin install clicky@clicky
 ```
 
 ## Quick Start
 
 ```bash
 # Basic scan
-/pentest 10.10.10.10
+/clicky:pentest 10.10.10.10
 
 # With known credentials
-/pentest 10.10.10.10 "user: admin, password: Password123"
+/clicky:pentest 10.10.10.10 "user: admin, password: Password123"
 
 # Cloud/API target
-/pentest api.example.com "cloud: AWS, service: kubernetes"
+/clicky:pentest api.example.com "cloud: AWS, service: kubernetes"
 ```
+
+For faster runs against targets with multiple independent services, `/clicky:pentest-parallel` tests them concurrently instead of one at a time (requires Claude Code v2.1.154+ and a paid plan — see [Workflow](docs/workflow.md) for the trade-offs).
 
 ## Legend
 
@@ -56,6 +78,8 @@ flowchart LR
 | Privesc | Yellow | Privilege escalation (user to root/admin) |
 | Loot | Green | Data extraction and credential harvesting |
 | Cloud Recon | Cyan | Cloud and container enumeration |
+| Source Analyzer | Pink | White-box source-code analysis |
+| Verification | Orange | Independent re-check of CRITICAL/HIGH findings |
 
 ### Priority Levels
 
@@ -79,20 +103,22 @@ flowchart LR
 
 ```text
 Clicky/
-|-- .claude/
-|   |-- agents/          # Agent definitions (markdown with YAML frontmatter)
-|   |-- commands/        # Slash commands (/pentest)
-|   |-- skills/          # SKILL.md files with scripts/references/assets
-|   |-- workflows/       # Multi-phase execution plans
-|   |-- hooks/           # Event triggers
-|-- docs/                # Detailed documentation
+|-- .claude-plugin/
+|   |-- plugin.json      # Plugin manifest
+|   |-- marketplace.json # Self-hosted marketplace listing
+|-- agents/               # Agent definitions (markdown with YAML frontmatter)
+|-- commands/              # Slash commands (/pentest)
+|-- skills/                # SKILL.md files with scripts/references/assets
+|-- workflows/             # Dynamic workflow scripts (/pentest-parallel)
+|-- hooks/                 # Event triggers (hooks.json)
+|-- docs/                  # Detailed documentation
 ```
 
 ## Core Components
 
-### Agents (6)
+### Agents (8)
 
-Agents are defined in `.claude/agents/` as markdown files with YAML frontmatter specifying model, tools, and skills.
+Agents are defined in `agents/` as markdown files with YAML frontmatter specifying model, tools, and skills.
 
 - **recon-agent**: Port scanning, service detection, environment fingerprinting
 - **decision-agent**: Strategic analysis, attack prioritization based on pentesting research
@@ -100,16 +126,19 @@ Agents are defined in `.claude/agents/` as markdown files with YAML frontmatter 
 - **privesc-agent**: Linux/Windows privilege escalation
 - **loot-agent**: Credential harvesting, data extraction
 - **cloud-recon-agent**: AWS/Azure/GCP/Kubernetes enumeration
+- **source-analyzer-agent**: White-box source-code analysis - source-to-sink mapping and vulnerable dependencies, feeding decision-agent as a parallel input (see [Agents](docs/agents.md#source-analyzer-agent))
+- **verification-agent**: Independently re-checks CRITICAL/HIGH findings against raw trace evidence before they reach the report (see [Agents](docs/agents.md#verification-agent))
 
 ### Commands
 
-Commands are defined in `.claude/commands/` as markdown files.
+Commands are defined in `commands/` as markdown files.
 
-- `/pentest <target> ["context"]` - Primary pentesting command
+- `/pentest <target> ["context"]` - Primary pentesting command (namespaced as `/clicky:pentest` once installed as a plugin)
+- `/clicky:pentest-parallel <target> ["context"]` - Dynamic-workflow equivalent that fans independent service checks out concurrently (see [Workflow](docs/workflow.md))
 
-### Skills (22)
+### Skills (21)
 
-Skills are defined in `.claude/skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories.
+Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories.
 
 ## Documentation
 
@@ -122,12 +151,15 @@ See the [docs/](docs/) directory for detailed documentation:
 | [Agents](docs/agents.md) | Detailed agent specifications |
 | [Workflow](docs/workflow.md) | Execution phases and decision logic |
 | [Skills](docs/skills.md) | Available skill modules |
+| [Observability](docs/observability.md) | Trace logs and OpenTelemetry - reviewing what happened in a run |
+| [Sandboxing](docs/sandboxing.md) | Using Claude Code's sandboxed Bash tool alongside Clicky's own scope enforcement |
 
 ## Requirements
 
 - Claude Code CLI
 - nmap, hydra, sqlmap (exploitation tools)
 - Network access to target
+- If you enable Claude Code's sandboxed Bash tool for an engagement (see [Sandboxing](docs/sandboxing.md)), note that `docker` is entirely incompatible with it - container-security testing needs a `sandbox.excludedCommands: ["docker *"]` carve-out and runs fully unsandboxed whenever that's active.
 
 ## Ethical Use
 

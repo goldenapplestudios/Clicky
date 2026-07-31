@@ -1,6 +1,6 @@
 # Clicky Architecture
 
-> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [README](../README.md)
+> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [Observability](observability.md) | [Sandboxing](sandboxing.md) | [README](../README.md)
 
 ---
 
@@ -129,10 +129,10 @@ An **agent** is a Claude model instance configured with:
 3. **Tool Access**: Which tools (Bash, Read, Write, etc.) it can use
 4. **Skills**: Which skills the agent can invoke
 
-In Claude Code, agents are defined as **markdown files with YAML frontmatter** in the `.claude/agents/` directory:
+In Claude Code, agents are defined as **markdown files with YAML frontmatter** in the `agents/` directory:
 
 ```text
-.claude/agents/
+agents/
 |-- recon-agent.md
 |-- decision-agent.md
 |-- exploit-agent.md
@@ -141,7 +141,7 @@ In Claude Code, agents are defined as **markdown files with YAML frontmatter** i
 |-- cloud-recon-agent.md
 ```
 
-**Example Agent Definition** (`.claude/agents/recon-agent.md`):
+**Example Agent Definition** (`agents/recon-agent.md`):
 
 ```markdown
 ---
@@ -187,10 +187,10 @@ A **skill** is a reusable module containing:
 
 **Why skills?** Without skills, every agent would need to know how to run nmap with perfect syntax. With skills, the agent invokes the skill and it provides the context, commands, and techniques needed.
 
-In Claude Code, skills are defined in the `.claude/skills/` directory:
+In Claude Code, skills are defined in the `skills/` directory:
 
 ```text
-.claude/skills/nmap-scanning/
+skills/nmap-scanning/
 |-- SKILL.md              # Main skill definition (required)
 |-- scripts/
 |   |-- quick-scan.sh     # nmap -T4 -F target
@@ -202,7 +202,7 @@ In Claude Code, skills are defined in the `.claude/skills/` directory:
 |   |-- custom-scripts.nse
 ```
 
-**Example Skill Definition** (`.claude/skills/nmap-scanning/SKILL.md`):
+**Example Skill Definition** (`skills/nmap-scanning/SKILL.md`):
 
 ```markdown
 # nmap-scanning
@@ -374,7 +374,7 @@ Clicky/
 |       |-- loot/                # Extracted data
 |       |-- reports/             # Final reports
 |
-|-- settings.json                # Global configuration
+|-- settings.json                # Claude Code's own settings (pluginConfigs holds Clicky's userConfig values)
 ```
 
 ---
@@ -646,70 +646,23 @@ fi
 
 ## Configuration
 
-### settings.json Explained
+### Configuration via `userConfig`
+
+Clicky doesn't ship a custom `settings.json`. Configurable values are declared as `userConfig` in `.claude-plugin/plugin.json`, and Claude Code prompts you for them when you enable the plugin — no hand-editing a config file required.
 
 ```json
-{
-  "pentest": {
-    "default_mode": "normal",           // normal, quick, thorough, stealth
-    "auto_save_checkpoints": true,      // Save state automatically
-    "checkpoint_interval": 300,         // Save every 5 minutes
-    "max_parallel_operations": 3        // Concurrent tasks limit
-  },
-
-  "scanning": {
-    "default_ports": "1-65535",         // Full TCP range
-    "scan_speed": "normal",             // T3 timing in nmap terms
-    "service_detection": true,          // Run -sV
-    "os_detection": true,               // Run -O
-    "script_scanning": true             // Run default scripts
-  },
-
-  "exploitation": {
-    "max_attempts_per_service": 3,      // Don't hammer one service
-    "timeout_per_attempt": 300,         // 5 min per exploit attempt
-    "credential_reuse": true,           // Try found creds everywhere
-    "auto_stabilize_shell": true        // Upgrade shells automatically
-  },
-
-  "agents": {
-    "recon": {
-      "temperature": 0.3,               // Low creativity
-      "timeout": 180                    // 3 minutes
-    },
-    "decision": {
-      "temperature": 0.4,               // Moderate reasoning
-      "timeout": 120                    // 2 minutes
-    },
-    "exploit": {
-      "temperature": 0.2,               // Very precise
-      "timeout": 300                    // 5 minutes
-    },
-    "privesc": {
-      "temperature": 0.3,               // Methodical
-      "timeout": 600                    // 10 minutes (complex task)
-    },
-    "loot": {
-      "temperature": 0.2,               // Systematic
-      "timeout": 300                    // 5 minutes
-    }
-  },
-
-  "safety": {
-    "require_authorization": true,      // Must confirm scope
-    "log_all_actions": true,            // Audit trail
-    "avoid_destructive_actions": true,  // No rm -rf, no DoS
-    "respect_scope_boundaries": true    // Only test authorized targets
-  },
-
-  "reporting": {
-    "format": "json",                   // Primary format
-    "include_timestamps": true,         // When things happened
-    "include_evidence": true,           // Screenshots, logs
-    "sanitize_credentials": true        // Mask passwords in reports
-  }
+"userConfig": {
+  "default_password_wordlist": { "type": "file", ... },
+  "default_username_wordlist": { "type": "file", ... },
+  "max_parallel_operations": { "type": "number", "default": 3, "min": 1, "max": 16 },
+  "require_confirmation_before_exploitation": { "type": "boolean", "default": false },
+  "default_session_directory": { "type": "directory", ... }
 }
 ```
+
+Non-sensitive values land in `pluginConfigs` in your own `~/.claude/settings.json` (never in the project's, so a cloned copy of this repo can't smuggle in different values) and are available to Clicky's commands, agents, and skills as `${user_config.<key>}` substitutions, or as `CLAUDE_PLUGIN_OPTION_<KEY>` environment variables inside hook processes. `max_parallel_operations` only affects `/clicky:pentest-parallel` (the dynamic-workflow entry point); `require_confirmation_before_exploitation` only affects `/clicky:pentest` (the prose entry point), since a running workflow can't pause for input. See [Usage](usage.md) for the full list of options and their defaults.
+
+Everything else this section used to describe — timeouts, per-agent temperature, scan speed, safety toggles — was never real: it was aspirational documentation for a `settings.json` that nothing in this repo has ever read. It's been removed rather than reintroduced, since the platform has no supported way to ship that sprawl of invented config through a plugin.
 
 ---
 

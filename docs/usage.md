@@ -1,6 +1,6 @@
 # Clicky Usage Guide
 
-> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [README](../README.md)
+> **Navigation**: [Usage](usage.md) | [Architecture](architecture.md) | [Agents](agents.md) | [Workflow](workflow.md) | [Skills](skills.md) | [Observability](observability.md) | [Sandboxing](sandboxing.md) | [README](../README.md)
 
 ---
 
@@ -8,14 +8,15 @@
 
 1. [Introduction](#introduction)
 2. [Prerequisites](#prerequisites)
-3. [Quick Start](#quick-start)
-4. [The /pentest Command](#the-pentest-command)
-5. [Understanding Arguments](#understanding-arguments)
-6. [Session Management](#session-management)
-7. [Reading Output](#reading-output)
-8. [Common Scenarios](#common-scenarios)
-9. [Troubleshooting](#troubleshooting)
-10. [Advanced Usage](#advanced-usage)
+3. [Configuration](#configuration)
+4. [Quick Start](#quick-start)
+5. [The /pentest Command](#the-pentest-command)
+6. [Understanding Arguments](#understanding-arguments)
+7. [Session Management](#session-management)
+8. [Reading Output](#reading-output)
+9. [Common Scenarios](#common-scenarios)
+10. [Troubleshooting](#troubleshooting)
+11. [Advanced Usage](#advanced-usage)
 
 ---
 
@@ -90,6 +91,22 @@ A **CLI (Command Line Interface)** is a text-based way to interact with your com
 
 ---
 
+## Configuration
+
+When you install Clicky (`/plugin install clicky@clicky`) or reload it after a local `--plugin-dir` install, Claude Code prompts you to fill in a few configuration values. You can leave any of them at their defaults and revisit later.
+
+| Setting | Type | Default | Used by |
+|---------|------|---------|---------|
+| Default password wordlist | file | `/usr/share/wordlists/rockyou.txt` | Credential-attack skills (hydra/hashcat) when an engagement doesn't specify its own list |
+| Default username wordlist | file | `/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt` | Same, for username spraying/enumeration |
+| Max parallel operations | number | `3` | Upper bound on concurrent service checks for `/clicky:pentest-parallel` only — the standard `/clicky:pentest` command runs sequentially regardless of this setting |
+| Confirm before exploitation | boolean | `false` | If `true`, `/clicky:pentest` pauses after strategic analysis and asks for explicit confirmation before running any exploitation commands. **Not honored by `/clicky:pentest-parallel`** — a running dynamic workflow can't pause for mid-run input |
+| Default session/output directory | directory | `~/.claude/sessions` | Where session data, loot, and reports are written |
+
+None of these are secrets, so they're stored in plain text in your own `~/.claude/settings.json` (never in the project you happen to be running Claude Code from). To change them later, use the `/plugin` interface or re-run the enable-time prompt.
+
+---
+
 ## Quick Start
 
 ### Your First Scan
@@ -156,17 +173,17 @@ In Claude Code, commands starting with `/` are **slash commands**. They're short
 
 ### How /pentest Works
 
-The `/pentest` command is defined in `.claude/commands/pentest.md`. This file contains:
+The `/pentest` command is defined in `commands/pentest.md`. This file contains:
 
-1. **Frontmatter**: Configuration (model, tools, permissions)
+1. **Frontmatter**: Configuration (model, allowed tools, argument names)
 2. **Template**: The workflow instructions
-3. **Variables**: Placeholders like `{{TARGET}}` that get replaced with your input
+3. **Variables**: Named argument placeholders, `$target` and `$context`, that get substituted with your input before the model ever sees the file
 
 ```text
 Your input:    /pentest 10.10.10.10 "user: admin"
                   │          │              │
-                  │          │              └── Becomes {{SUMMARY}}
-                  │          └──────────────── Becomes {{TARGET}}
+                  │          │              └── Becomes $context
+                  │          └──────────────── Becomes $target
                   └─────────────────────────── Triggers the command
 ```
 
@@ -176,9 +193,8 @@ The `/pentest` command runs with these settings:
 
 | Setting | Value | Meaning |
 |---------|-------|---------|
-| model | claude-sonnet-4-5 | Uses Sonnet for orchestration |
-| thinking | true | Enables extended reasoning |
-| permissionMode | ask | Asks before sensitive actions |
+| model | sonnet | Uses Sonnet for orchestration |
+| disable-model-invocation | true | Only runs when you explicitly type `/pentest` — Claude won't auto-trigger a live pentest on its own |
 
 ### Allowed Tools
 
@@ -189,6 +205,10 @@ Clicky can use these tools during a pentest:
 **System**: ls, cat, grep, find, ps, id, whoami
 **Cloud**: aws, az, gcloud, docker
 **File Operations**: Read, Write, Edit, Grep
+
+### A Faster, Parallel Alternative
+
+`/clicky:pentest-parallel <target> ["context"]` runs the same overall attack sequence as `/pentest`, but tests independent services concurrently instead of one at a time, and can't pause for confirmation mid-run. It needs Claude Code v2.1.154+ and a paid plan. See [Workflow](workflow.md#two-entry-points-pentest-vs-pentest-parallel) for the full trade-off comparison.
 
 ---
 
@@ -651,10 +671,10 @@ allowed-tools: Bash(nmap:*), Bash(sqlmap:*), Bash(hydra:*), ...
 
 #### Adding Custom Skills
 
-Create new skills in `.claude/skills/`:
+Create new skills in `skills/`:
 
 ```text
-.claude/skills/my-custom-skill/
+skills/my-custom-skill/
 ├── SKILL.md           # Skill definition
 ├── scripts/
 │   └── my-script.sh   # Custom scripts
@@ -664,7 +684,7 @@ Create new skills in `.claude/skills/`:
 
 #### Creating Custom Commands
 
-Add commands to `.claude/commands/`:
+Add commands to `commands/`:
 
 ```markdown
 ---

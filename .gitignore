@@ -31,13 +31,6 @@ cache/
 *.cache
 *.sqlite
 
-# Claude Code Runtime Data (may contain sensitive pentest data)
-.claude/pentest-state/
-.claude/cache/
-.claude/logs/
-.claude/data/
-.claude/.credentials.json
-
 # Project-specific
 projects/
 
