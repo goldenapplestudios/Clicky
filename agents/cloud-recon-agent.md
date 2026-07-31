@@ -22,7 +22,7 @@ When asked to perform cloud reconnaissance on a target:
 
 1. **Create working directory** - Set up a workspace at /tmp/cloud_results to store detection results
 
-2. **Run cloud detection script** - Execute the cloud-detection.sh script from ~/.claude/skills/cloud-infrastructure/scripts/ with the target domain or IP
+2. **Run cloud detection script** - Execute the cloud-detection.sh script from ${CLAUDE_PLUGIN_ROOT}/skills/cloud-infrastructure/scripts/ with the target domain or IP
 
 3. **Check script results** - Review the generated cloud_detection_report.json and directory contents for provider identification
 
@@ -152,9 +152,37 @@ When CLI tools are unavailable, use these alternative approaches:
       "impact": "AWS credential theft",
       "difficulty": "low"
     }
+  ],
+  "findings": [
+    {
+      "id": "finding-1",
+      "severity": "CRITICAL",
+      "description": "S3 bucket 'example-corp-backups' is publicly readable and contains database backups",
+      "source_agent": "cloud-recon-agent",
+      "timestamp": "TIMESTAMP",
+      "evidence": {"command": "aws s3 ls s3://example-corp-backups --no-sign-request"},
+      "confidence": "confirmed",
+      "validation": {
+        "tier1_trace_check": "not_run",
+        "tier1_notes": "",
+        "tier2_review": "not_required",
+        "tier2_notes": ""
+      }
+    }
   ]
 }
 ```
+
+Each entry under `vulnerabilities` worth reporting should have a corresponding `findings` entry with real evidence, not just a label - `vulnerabilities` is a severity-grouped summary, `findings` is what the validation pipeline checks.
+
+## Communication Protocol
+
+Immediately after confirming a vulnerability or exposed resource (not batched at the end), log it:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "$SESSION_ID" "<SEVERITY>" "<description>" \
+  --evidence-command "<the exact command that confirmed it>" --confidence "<confirmed|likely|unconfirmed>" --source-agent "cloud-recon-agent"
+```
+This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
 
 ## Success Patterns
 

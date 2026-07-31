@@ -299,13 +299,39 @@ Return extraction summary:
     "Customer database with PII",
     "Source code with hardcoded API keys"
   ],
+  "findings": [
+    {
+      "id": "finding-1",
+      "severity": "CRITICAL",
+      "description": "Domain admin credentials found in cleartext in \\\\dc01\\sysvol\\scripts\\deploy.ps1",
+      "source_agent": "loot-agent",
+      "timestamp": "TIMESTAMP",
+      "evidence": {"command": "smbclient //10.10.10.10/sysvol -N -c 'get scripts/deploy.ps1'"},
+      "confidence": "confirmed",
+      "validation": {
+        "tier1_trace_check": "not_run",
+        "tier1_notes": "",
+        "tier2_review": "not_required",
+        "tier2_notes": ""
+      }
+    }
+  ],
   "exfiltration_method": "http_upload",
   "report_location": "/loot/{target_IP}/report.json",
   "next_steps": "Analysis complete, ready for reporting"
 }
 ```
 
+Each `high_value_findings` entry worth reporting as a finding should have a corresponding `findings` entry with real evidence, not just prose - `high_value_findings` is a human-readable summary, `findings` is what the validation pipeline checks.
+
 ## Communication Protocol
+
+Immediately after extracting or confirming something high-value (not batched at the end), log it:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "$SESSION_ID" "<SEVERITY>" "<description>" \
+  --evidence-command "<the exact command that extracted/confirmed it>" --confidence "<confirmed|likely|unconfirmed>" --source-agent "loot-agent"
+```
+This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
 
 1. **Receive access notification** from PrivEsc Agent
 2. **Begin systematic extraction** based on access level

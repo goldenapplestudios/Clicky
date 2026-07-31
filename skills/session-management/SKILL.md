@@ -15,53 +15,54 @@ Provides comprehensive session management for penetration testing workflows, ens
 Execute session creation for new targets:
 ```bash
 # Create new session - returns SESSION_ID
-scripts/session-manager.sh create "{target_ip}"
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh create "{target_ip}"
 
 # Resume existing session
-scripts/session-manager.sh resume "{session_id}"
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh resume "{session_id}"
 
 # List all sessions
-scripts/session-manager.sh list
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh list
 ```
 
 ### State Persistence
-Track and persist agent states throughout the engagement:
+Track and persist agent states throughout the engagement - see "Integration with Agents" below for the full store/check-failed/record pattern agents actually use:
 ```bash
-# Record state changes
-scripts/state-persistence.sh record "{session_id}" "{agent_name}" "{state_key}" "{state_value}"
+# Record an attempt's outcome (technique, description, success true/false)
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false
 
-# Retrieve state
-scripts/state-persistence.sh get "{session_id}" "{agent_name}" "{state_key}"
+# Check whether a technique already failed, before repeating it
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "ftp" "anonymous_login"
 
-# Export session state
-scripts/state-persistence.sh export "{session_id}"
+# Get a session-wide summary of everything recorded so far
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh summary "$SESSION_ID"
 ```
 
 ### Recovery Mechanisms
-Handle failures and resume operations:
+The `Stop` hook (`hooks/hooks.json`) already runs `pentest-recovery-hook.sh` automatically with no arguments (defaults to its `check` action) whenever a session stops - you don't normally invoke this directly. Its real subcommands, for reference:
 ```bash
-# Setup recovery hook
-scripts/pentest-recovery-hook.sh install "{session_id}"
+# Activate recovery mode after a failure
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh init "{target}" "{failure_type}"
 
-# Check recovery status
-scripts/pentest-recovery-hook.sh status "{session_id}"
+# Check recovery status and execute the next strategy (what the Stop hook calls automatically)
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh check
 
-# Restore from checkpoint
-scripts/pentest-recovery-hook.sh restore "{session_id}"
+# Deactivate recovery mode
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh stop
 ```
 
 ## Session Directory Structure
 
-All sessions are organized under `$HOME/.claude/sessions/{session_id}/`:
+All sessions are organized under `$HOME/.claude/sessions/{session_id}/` (or wherever the `default_session_directory` userConfig option points):
 ```
 {session_id}/
-├── metadata.json       # Target info, timestamps, status
-├── recon/             # Reconnaissance results
-├── exploit/           # Exploitation attempts and results
-├── privesc/           # Privilege escalation data
-├── loot/              # Extracted credentials and files
-├── reports/           # Generated reports
-└── checkpoints/       # Recovery checkpoints
+├── session.json        # Target info, timestamps, status (not metadata.json)
+├── recon/              # Reconnaissance results
+├── exploits/           # Exploitation attempts and results
+├── loot/                # Extracted credentials and files
+├── reports/             # Generated reports, including reports/findings.json
+├── credentials/         # Harvested usernames/passwords/hashes
+└── logs/                # Error and hook logs, e.g. logs/scope-enforcement.log
 ```
 
 ## Usage Instructions
@@ -93,14 +94,12 @@ Use standardized state keys for consistency:
 
 ## Integration with Agents
 
+`$SESSION_ID`/`$SESSION_DIR` are set earlier in the workflow (`commands/pentest.md` Step 1 exports them via `session-manager.sh create`) — there's no "get the current session" lookup, use the values already in the environment.
+
 ### Reading Session Data
 ```bash
-# Get current session ID
-SESSION_ID=$(scripts/session-manager.sh current)
-
-# Read session metadata
-SESSION_DIR="$HOME/.claude/sessions/$SESSION_ID"
-TARGET=$(jq -r .target "$SESSION_DIR/metadata.json")
+# Read session metadata (the file is session.json, not metadata.json)
+TARGET=$(jq -r .target "$SESSION_DIR/session.json")
 ```
 
 ### Writing Results
@@ -108,19 +107,27 @@ TARGET=$(jq -r .target "$SESSION_DIR/metadata.json")
 # Save reconnaissance results
 echo "$scan_results" > "$SESSION_DIR/recon/nmap_scan.txt"
 
-# Record important findings
-scripts/state-persistence.sh record "$SESSION_ID" "recon-agent" "open_ports" "[21,22,80,443]"
+# Record a discovery for other agents to pick up (store/get-unused, not
+# record - record is specifically for attack attempts, see below)
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh store \
+  "services" '{"open_ports":[21,22,80,443]}' "$SESSION_ID"
 ```
 
 ### Coordinating Between Agents
 ```bash
-# Check if another agent already completed a task
-if scripts/state-persistence.sh get "$SESSION_ID" "*" "ftp_checked" | grep -q "true"; then
-    echo "FTP already checked by another agent"
+# Check if a technique already failed (for a previous agent or a previous
+# turn) before repeating it - there's no general "already checked" flag,
+# but check-failed covers the common case of not repeating known failures
+if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "ftp" "anonymous_login"; then
+    echo "Proceeding - no prior failed attempt recorded for this technique"
 else
-    # Perform FTP checks
-    scripts/state-persistence.sh record "$SESSION_ID" "loot-agent" "ftp_checked" "true"
+    echo "FTP anonymous login already failed in this session - skip or try a different technique"
 fi
+
+# After actually attempting something, record the outcome so later agents
+# benefit from this check
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false
 ```
 
 ## Error Handling

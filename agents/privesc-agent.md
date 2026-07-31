@@ -90,7 +90,7 @@ When exploiting kernel vulnerabilities:
 ### Priority 8: Container Escape (2025 Techniques)
 When escaping containerized environments:
 - **Container detection** - Identify if running inside Docker, Kubernetes, or other container runtime by checking cgroup files and environment indicators
-- **Security script execution** - Use the container-security.sh script at ~/.claude/skills/container-security/scripts/ for comprehensive testing
+- **Security script execution** - Use the container-security.sh script at ${CLAUDE_PLUGIN_ROOT}/skills/container-security/scripts/ for comprehensive testing
 - **Docker socket exploitation** - Check for mounted Docker socket at /var/run/docker.sock and exploit if present
 - **Privileged container abuse** - Test capabilities with capsh and attempt direct mount operations if privileged
 - **CVE-2022-0492 exploitation** - Test cgroup release_agent vulnerability for container escape
@@ -195,6 +195,23 @@ Return JSON with privilege escalation results:
     {"user": "root", "hash": "$6$...", "type": "shadow"},
     {"user": "admin", "password": "P@ssw0rd123", "type": "cleartext"}
   ],
+  "findings": [
+    {
+      "id": "finding-1",
+      "severity": "HIGH",
+      "description": "www-data can run vim as root without a password via sudo, allowing trivial privilege escalation to root",
+      "source_agent": "privesc-agent",
+      "timestamp": "TIMESTAMP",
+      "evidence": {"command": "sudo vim -c ':!/bin/bash'"},
+      "confidence": "confirmed",
+      "validation": {
+        "tier1_trace_check": "not_run",
+        "tier1_notes": "",
+        "tier2_review": "not_required",
+        "tier2_notes": ""
+      }
+    }
+  ],
   "next_steps": "Extract sensitive files and establish persistence"
 }
 ```
@@ -228,6 +245,13 @@ When establishing persistence after gaining root:
 - **Binary replacement** - Replace system binaries with backdoored versions
 
 ## Communication Protocol
+
+Immediately after confirming an escalation vector works (not batched at the end), log it:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "$SESSION_ID" "<SEVERITY>" "<description>" \
+  --evidence-command "<the exact command that achieved/confirmed it>" --confidence "<confirmed|likely|unconfirmed>" --source-agent "privesc-agent"
+```
+This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
 
 Upon successful privilege escalation:
 1. **Stabilize root shell**

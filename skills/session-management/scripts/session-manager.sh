@@ -6,8 +6,11 @@
 
 set -euo pipefail
 
-# Base directory for sessions
-SESSION_BASE="$HOME/.claude/sessions"
+# Base directory for sessions. Honors the plugin's default_session_directory
+# userConfig option (exported to hook/skill subprocesses as
+# CLAUDE_PLUGIN_OPTION_DEFAULT_SESSION_DIRECTORY) when set, otherwise falls
+# back to the standard location under the user's home directory.
+SESSION_BASE="${CLAUDE_PLUGIN_OPTION_DEFAULT_SESSION_DIRECTORY:-$HOME/.claude/sessions}"
 
 # Function to create a new session
 create_session() {
@@ -28,6 +31,15 @@ create_session() {
   "phase": "initialization"
 }
 EOF
+
+    # Point the trace-logger hook (skills/session-management/scripts/trace-logger.sh)
+    # at this session, so its JSONL entries can be opportunistically tagged with
+    # this session directory. Best-effort only: a hook can't reliably learn
+    # Claude Code's own session_id from a plain Bash tool call, so the trace log
+    # itself is always keyed independently on that; this pointer is just a
+    # convenience cross-reference, and a concurrent second /pentest run will
+    # overwrite it, at which point earlier lines simply stop getting tagged.
+    echo "$session_dir" > "$SESSION_BASE/.current-session"
 
     echo "$session_id"
     return 0
@@ -93,10 +105,33 @@ save_credentials() {
 }
 
 # Function to log findings
+#
+# Usage: log_finding <session_id> <severity> <description> \
+#          [--evidence-command "<command>"] [--confidence confirmed|likely|unconfirmed] \
+#          [--source-agent "<agent-name>"]
+#
+# --evidence-command is what the Tier 1 trace cross-check
+# (finding-validator.sh) later matches against the session's trace log to
+# confirm the command was actually run; without it, the finding stays
+# "no_evidence" and can never pass Tier 1. --confidence defaults to
+# "unconfirmed" (not "confirmed") so a finding never looks validated just
+# because a caller forgot the flag.
 log_finding() {
     local session_id="$1"
     local severity="$2"  # CRITICAL, HIGH, MEDIUM, LOW, INFO
     local finding="$3"
+    shift 3 || true
+
+    local evidence_command="" confidence="unconfirmed" source_agent=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --evidence-command) evidence_command="$2"; shift 2 ;;
+            --confidence) confidence="$2"; shift 2 ;;
+            --source-agent) source_agent="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
     local session_dir="$SESSION_BASE/$session_id"
 
     if [ ! -d "$session_dir" ]; then
@@ -110,12 +145,32 @@ log_finding() {
         echo '{"findings": []}' > "$findings_file"
     fi
 
-    # Add finding
+    # Add finding. id is derived from the current findings count, so it's
+    # sequential within this session regardless of which agent logs it.
+    # validation starts at not_run/not_required - finding-validator.sh
+    # (Tier 1) and verification-agent (Tier 2) fill these in later.
     local temp_file=$(mktemp)
     jq --arg severity "$severity" \
        --arg finding "$finding" \
        --arg time "$(date -Iseconds)" \
-       '.findings += [{"severity": $severity, "description": $finding, "timestamp": $time}]' \
+       --arg evidence_command "$evidence_command" \
+       --arg confidence "$confidence" \
+       --arg source_agent "$source_agent" \
+       '.findings += [{
+           id: ("finding-" + (((.findings | length) + 1) | tostring)),
+           severity: $severity,
+           description: $finding,
+           source_agent: $source_agent,
+           timestamp: $time,
+           evidence: {command: $evidence_command},
+           confidence: $confidence,
+           validation: {
+               tier1_trace_check: "not_run",
+               tier1_notes: "",
+               tier2_review: "not_required",
+               tier2_notes: ""
+           }
+       }]' \
        "$findings_file" > "$temp_file" && \
        mv "$temp_file" "$findings_file"
 
@@ -201,6 +256,12 @@ archive_session() {
 
     # Move to archive
     mv "$session_dir" "$archive_dir/"
+
+    # Clear the current-session pointer if it was pointing at this session,
+    # so the trace-logger hook stops tagging new lines with a moved directory.
+    if [ -f "$SESSION_BASE/.current-session" ] && [ "$(cat "$SESSION_BASE/.current-session" 2>/dev/null)" = "$session_dir" ]; then
+        rm -f "$SESSION_BASE/.current-session"
+    fi
 
     echo "Session archived: $session_id"
     return 0
