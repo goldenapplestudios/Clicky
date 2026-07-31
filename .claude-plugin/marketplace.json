@@ -1,0 +1,15 @@
+{
+  "name": "clicky",
+  "owner": {
+    "name": "Kali Jackson",
+    "url": "https://github.com/goldenapplestudios/Clicky"
+  },
+  "description": "Marketplace for the Clicky multi-agent penetration testing framework.",
+  "plugins": [
+    {
+      "name": "clicky",
+      "source": "./",
+      "description": "Multi-agent penetration testing framework: recon, exploitation, privilege escalation, and looting agents driven by decision tree logic from pentesting research."
+    }
+  ]
+}

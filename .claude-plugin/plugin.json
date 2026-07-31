@@ -1,0 +1,55 @@
+{
+  "name": "clicky",
+  "displayName": "Clicky",
+  "description": "Multi-agent penetration testing framework: orchestrates specialized agents through recon, exploitation, privilege escalation, and looting using decision tree logic derived from pentesting research.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Kali Jackson"
+  },
+  "homepage": "https://github.com/goldenapplestudios/Clicky",
+  "repository": "https://github.com/goldenapplestudios/Clicky",
+  "keywords": ["pentesting", "security", "automation", "hacking", "enumeration", "exploitation"],
+  "userConfig": {
+    "default_password_wordlist": {
+      "type": "file",
+      "title": "Default password wordlist",
+      "description": "Used by credential-attack skills (hydra/hashcat) when no engagement-specific list is supplied.",
+      "default": "/usr/share/wordlists/rockyou.txt",
+      "required": false
+    },
+    "default_username_wordlist": {
+      "type": "file",
+      "title": "Default username wordlist",
+      "description": "Used for spraying/enumeration when no engagement-specific list is supplied.",
+      "default": "/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt",
+      "required": false
+    },
+    "max_parallel_operations": {
+      "type": "number",
+      "title": "Max parallel operations",
+      "description": "Upper bound on concurrent service checks for /clicky:pentest-parallel.",
+      "default": 3,
+      "min": 1,
+      "max": 16
+    },
+    "require_confirmation_before_exploitation": {
+      "type": "boolean",
+      "title": "Confirm before exploitation",
+      "description": "Pause /clicky:pentest before moving from analysis into active exploitation. Not honored by /clicky:pentest-parallel, since workflows can't pause for mid-run input.",
+      "default": false
+    },
+    "default_session_directory": {
+      "type": "directory",
+      "title": "Default session/output directory",
+      "description": "Base directory for session data, loot, and reports. Falls back to ~/.claude/sessions if unset.",
+      "required": false
+    },
+    "scope_enforcement": {
+      "type": "string",
+      "title": "Scope enforcement mode",
+      "description": "Controls the PreToolUse scope-enforcement hook. 'enforce' (default): deny out-of-scope targets, ask about unlisted ones. 'warn': never blocks, just logs what it would have done to the session's logs/scope-enforcement.log. 'off': disables the hook entirely. Any other value is treated as 'enforce'.",
+      "default": "enforce",
+      "required": false
+    }
+  }
+}

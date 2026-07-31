@@ -29,12 +29,12 @@ Provides fallback commands and alternatives when primary tools are unavailable.
 
 ### Check Tool Availability
 ```bash
-~/.claude/skills/tool-management/scripts/tool-check.sh
+${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-check.sh
 ```
 
 ### Get Fallback Commands
 ```bash
-~/.claude/skills/tool-management/scripts/tool-fallback.sh <tool-name>
+${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-fallback.sh <tool-name>
 ```
 
 ## Integration Notes
