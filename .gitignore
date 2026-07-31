@@ -42,6 +42,10 @@ projects/
 **/creds/
 **/dumps/
 
+# Python artifacts
+__pycache__/
+*.pyc
+
 # OS artifacts
 .DS_Store
 Thumbs.db

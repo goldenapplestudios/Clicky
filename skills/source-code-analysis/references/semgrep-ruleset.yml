@@ -1,0 +1,344 @@
+# Bundled, offline Semgrep ruleset for skills/source-code-analysis.
+#
+# Deliberately NOT `--config auto` - that pulls from the Semgrep Registry
+# over the network on every run, a dependency this skill's tool-preference
+# idiom (see dependency-scanner.sh's trivy-preferred pattern) explicitly
+# avoids since this step has no fallback story of its own if the registry
+# is unreachable. This ruleset is scoped to match what source_taint_scan.py
+# already covers - sql_injection, command_injection, code_injection, xss,
+# path_traversal, ssrf, hardcoded_secret - so the two paths stay comparable
+# and semgrep_normalize.py's `type` mapping table stays exhaustive.
+#
+# `id` is deliberately namespaced `clicky-<type>-<lang>-...` so
+# semgrep_normalize.py can substring-match it back to source_taint_scan.py's
+# `type` vocabulary without guessing.
+
+rules:
+  # --- sql_injection ---
+  - id: clicky-sql-injection-python-concat
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Possible SQL injection: a SQL keyword appears alongside string
+      concatenation/formatting rather than a parameterized query.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute("..." + $X)
+          - pattern: $CUR.execute(f"...{$X}...")
+          - pattern: $CUR.execute("...".format(...))
+          - pattern: $QUERY = "..." + $X
+          - pattern: $QUERY = f"...{$X}..."
+
+  - id: clicky-sql-injection-js-concat
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Possible SQL injection: query built via string concatenation or a
+      template literal instead of a parameterized/prepared statement.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query("..." + $X)
+          - pattern: $DB.query(`...${$X}...`)
+          - pattern: $DB.execute("..." + $X)
+          - pattern: $DB.execute(`...${$X}...`)
+
+  - id: clicky-sql-injection-php-concat
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Possible SQL injection: query string built by concatenating a
+      variable directly rather than using a prepared statement.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $CONN->query("..." . $X . "...")
+          - pattern: mysqli_query($CONN, "..." . $X . "...")
+          - pattern: $CONN->query("..." . $X)
+
+  - id: clicky-sql-injection-java-concat
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Possible SQL injection: Statement executed with a concatenated
+      string instead of a PreparedStatement with bound parameters.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $STMT.executeQuery("..." + $X)
+          - pattern: $STMT.execute("..." + $X)
+
+  # --- command_injection ---
+  - id: clicky-command-injection-python
+    languages: [python]
+    severity: ERROR
+    message: "Possible command injection via shell=True or os.system/popen with dynamic input."
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: os.system($X)
+          - pattern: os.popen($X)
+          - pattern: subprocess.call($X, ..., shell=True, ...)
+          - pattern: subprocess.run($X, ..., shell=True, ...)
+          - pattern: subprocess.Popen($X, ..., shell=True, ...)
+          - pattern: subprocess.check_output($X, ..., shell=True, ...)
+
+  - id: clicky-command-injection-js
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "Possible command injection via child_process.exec with dynamic input."
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: child_process.exec($X)
+          - pattern: child_process.execSync($X)
+          - pattern: exec($X)
+          - pattern: execSync($X)
+
+  - id: clicky-command-injection-php
+    languages: [php]
+    severity: ERROR
+    message: "Possible command injection via shell_exec/exec/system/popen/passthru with dynamic input."
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: shell_exec($X)
+          - pattern: exec($X)
+          - pattern: system($X)
+          - pattern: popen($X, ...)
+          - pattern: passthru($X)
+
+  - id: clicky-command-injection-java
+    languages: [java]
+    severity: ERROR
+    message: "Possible command injection via Runtime.exec/ProcessBuilder with dynamic input."
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: Runtime.getRuntime().exec($X)
+          - pattern: new ProcessBuilder($X)
+
+  - id: clicky-command-injection-go
+    languages: [go]
+    severity: ERROR
+    message: "Possible command injection: exec.Command built with unsanitized input."
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern: exec.Command($X, ...)
+
+  # --- code_injection ---
+  - id: clicky-code-injection-python
+    languages: [python]
+    severity: ERROR
+    message: "Dynamic code execution / unsafe deserialization (eval, exec, pickle.load(s), unsafe yaml.load)."
+    metadata:
+      cwe: "CWE-94"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+          - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
+          - pattern: yaml.load(...)
+          - pattern: yaml.load($X, Loader=yaml.Loader)
+
+  - id: clicky-code-injection-js
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "Dynamic code execution via eval() or the Function constructor."
+    metadata:
+      cwe: "CWE-94"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: new Function(...)
+
+  - id: clicky-code-injection-php
+    languages: [php]
+    severity: ERROR
+    message: "Unsafe deserialization via unserialize() of potentially attacker-controlled data."
+    metadata:
+      cwe: "CWE-502"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+    patterns:
+      - pattern: unserialize($X)
+
+  # --- xss ---
+  - id: clicky-xss-js-dom
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "Possible DOM XSS: unsanitized data assigned to innerHTML or written via document.write."
+    metadata:
+      cwe: "CWE-79"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $X
+          - pattern: document.write($X)
+
+  - id: clicky-xss-react-dangerous
+    languages: [generic]
+    severity: WARNING
+    message: "dangerouslySetInnerHTML used - confirm the value is sanitized before it reaches here."
+    metadata:
+      cwe: "CWE-79"
+      owasp: "A03:2021 - Injection"
+    pattern-regex: 'dangerouslySetInnerHTML\s*='
+
+  - id: clicky-xss-vue-html-directive
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "v-html directive renders raw HTML - confirm the bound value is sanitized."
+    metadata:
+      cwe: "CWE-79"
+      owasp: "A03:2021 - Injection"
+    pattern-regex: 'v-html\s*='
+
+  # --- path_traversal ---
+  - id: clicky-path-traversal-python
+    languages: [python]
+    severity: WARNING
+    message: "Possible path traversal: file opened using a path built from request data."
+    metadata:
+      cwe: "CWE-22"
+      owasp: "A01:2021 - Broken Access Control"
+    patterns:
+      - pattern-either:
+          - pattern: open(request.$METHOD[...], ...)
+          - pattern: open(request.args[...], ...)
+
+  - id: clicky-path-traversal-php
+    languages: [php]
+    severity: WARNING
+    message: "Possible LFI/path traversal: include/require built from a superglobal."
+    metadata:
+      cwe: "CWE-22"
+      owasp: "A01:2021 - Broken Access Control"
+    patterns:
+      - pattern-either:
+          - pattern: include($_GET[...])
+          - pattern: include($_POST[...])
+          - pattern: include($_REQUEST[...])
+          - pattern: require($_GET[...])
+          - pattern: require($_POST[...])
+          - pattern: require($_REQUEST[...])
+          - pattern: include_once($_GET[...])
+          - pattern: require_once($_GET[...])
+
+  - id: clicky-path-traversal-js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "Possible path traversal: filesystem read built from request data."
+    metadata:
+      cwe: "CWE-22"
+      owasp: "A01:2021 - Broken Access Control"
+    pattern: fs.readFileSync(req.$X, ...)
+
+  # --- ssrf ---
+  - id: clicky-ssrf-python
+    languages: [python]
+    severity: WARNING
+    message: "Possible SSRF: outbound HTTP request built from request/user-controlled data."
+    metadata:
+      cwe: "CWE-918"
+      owasp: "A10:2021 - Server-Side Request Forgery"
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(request.$X, ...)
+          - pattern: requests.post(request.$X, ...)
+
+  - id: clicky-ssrf-js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "Possible SSRF: fetch() called with a URL derived from request data."
+    metadata:
+      cwe: "CWE-918"
+      owasp: "A10:2021 - Server-Side Request Forgery"
+    pattern: fetch(req.$X, ...)
+
+  - id: clicky-ssrf-php
+    languages: [php]
+    severity: WARNING
+    message: "Possible SSRF: curl_exec used without visible allowlist/validation of the target URL."
+    metadata:
+      cwe: "CWE-918"
+      owasp: "A10:2021 - Server-Side Request Forgery"
+    pattern: curl_exec($X)
+
+  # --- hardcoded_secret (generic, language-agnostic - mirrors
+  # source_taint_scan.py's SECRET_PATTERNS so both paths find the same
+  # secret classes) ---
+  - id: clicky-hardcoded-secret-private-key
+    languages: [generic]
+    severity: ERROR
+    message: "Hardcoded private key material found in source."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+  - id: clicky-hardcoded-secret-aws-key
+    languages: [generic]
+    severity: ERROR
+    message: "Hardcoded AWS access key ID found in source."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '\bAKIA[0-9A-Z]{16}\b'
+
+  - id: clicky-hardcoded-secret-slack-token
+    languages: [generic]
+    severity: ERROR
+    message: "Hardcoded Slack token found in source."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '\bxox[baprs]-[0-9A-Za-z-]{10,}\b'
+
+  - id: clicky-hardcoded-secret-api-key
+    languages: [generic]
+    severity: WARNING
+    message: "Possible hardcoded API key / secret / token assignment."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '(?i)(api[_-]?key|secret|token)[^=:\n]{0,10}[:=]\s*[''"][A-Za-z0-9_\-]{16,}[''"]'
+
+  - id: clicky-hardcoded-secret-password
+    languages: [generic]
+    severity: WARNING
+    message: "Possible hardcoded password assignment."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '(?i)(password|passwd|pwd)\s*[:=]\s*[''"][^''"]{4,}[''"]'
+
+  - id: clicky-hardcoded-secret-db-connection-string
+    languages: [generic]
+    severity: WARNING
+    message: "Database connection string with embedded credentials."
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A02:2021 - Cryptographic Failures"
+    pattern-regex: '(?i)(mysql|postgres(?:ql)?|mongodb)://[^:\s''"]+:[^@\s''"]+@'

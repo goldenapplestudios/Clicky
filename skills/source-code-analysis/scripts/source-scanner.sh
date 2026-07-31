@@ -8,13 +8,17 @@
 #   source-scanner.sh acquire --source <path|git_url|exposed_git_url> --output-dir <dir>
 #   source-scanner.sh scan --dir <dir> [--output <json_file>]
 #
-# `scan` is grep/regex-based heuristics, not real dataflow/AST analysis -
-# it flags a dangerous sink with an untrusted-input source nearby in the
-# same file as a candidate, not a proven exploitable path. Treat every
-# finding as a strong hint worth manually confirming (and, once a live
-# target exists, worth confirming against it - see
+# `scan` prefers Semgrep (real AST-based static analysis, via the bundled
+# offline ruleset at references/semgrep-ruleset.yml - not `--config auto`,
+# which would hit the network) when installed, and falls back to this
+# repo's own grep/regex-based heuristic scanner otherwise. The regex
+# fallback flags a dangerous sink with an untrusted-input source nearby in
+# the same file as a candidate, not a proven exploitable path. Either way,
+# treat every finding as a strong hint worth manually confirming (and,
+# once a live target exists, worth confirming against it - see
 # agents/source-analyzer-agent.md and the plan's Track 3 risk notes), not
-# as gospel.
+# as gospel. Check the output's "scanner" field ("semgrep" or
+# "regex_taint_scan") to see which path actually ran.
 #
 
 set -uo pipefail
@@ -119,8 +123,27 @@ scan() {
         exit 1
     fi
 
-    local result
-    result=$(python3 "$(dirname "${BASH_SOURCE[0]}")/source_taint_scan.py" "$dir")
+    local script_dir result=""
+    script_dir="$(dirname "${BASH_SOURCE[0]}")"
+
+    if command -v semgrep >/dev/null 2>&1; then
+        local semgrep_out semgrep_err
+        semgrep_out=$(mktemp)
+        semgrep_err=$(mktemp)
+        semgrep --config "$script_dir/../references/semgrep-ruleset.yml" \
+            --json --quiet "$dir" > "$semgrep_out" 2>"$semgrep_err"
+        if [ -s "$semgrep_out" ] && python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$semgrep_out" 2>/dev/null; then
+            result=$(python3 "$script_dir/semgrep_normalize.py" "$semgrep_out" --source-dir "$dir")
+        else
+            echo "WARNING: semgrep is installed but produced no usable output (see below) - falling back to the regex/proximity scanner" >&2
+            cat "$semgrep_err" >&2 2>/dev/null || true
+        fi
+        rm -f "$semgrep_out" "$semgrep_err"
+    fi
+
+    if [ -z "$result" ]; then
+        result=$(python3 "$script_dir/source_taint_scan.py" "$dir")
+    fi
 
     if [ -n "$output" ]; then
         echo "$result" > "$output"

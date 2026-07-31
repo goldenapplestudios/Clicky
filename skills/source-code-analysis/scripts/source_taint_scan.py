@@ -7,12 +7,14 @@ Usage: source_taint_scan.py <directory>
 Prints a JSON object matching agents/source-analyzer-agent.md's output
 schema to stdout: {"source_location": ..., "findings": [...]}.
 
-This is regex/proximity-based, not real dataflow or AST analysis: a
-"tainted sink" finding means a dangerous sink pattern and an
-untrusted-input pattern both appear within a few lines of each other in
-the same file, not that data provably flows from one to the other. Treat
-every finding as a lead worth manually confirming, not a proven
-vulnerability - see agents/source-analyzer-agent.md.
+This is the fallback path run when Semgrep isn't installed (see
+source-scanner.sh's `scan()`, which prefers Semgrep's real AST-based
+analysis when available). This scanner itself is regex/proximity-based,
+not real dataflow or AST analysis: a "tainted sink" finding means a
+dangerous sink pattern and an untrusted-input pattern both appear within a
+few lines of each other in the same file, not that data provably flows
+from one to the other. Treat every finding as a lead worth manually
+confirming, not a proven vulnerability - see agents/source-analyzer-agent.md.
 
 Secret patterns are extended from (not duplicated line-for-line out of)
 skills/report-generation/scripts/report-generator.sh's `sanitize`
@@ -209,6 +211,7 @@ def main():
     print(json.dumps({
         "source_location": os.path.abspath(root),
         "files_scanned": files_scanned,
+        "scanner": "regex_taint_scan",
         "findings": findings,
     }, indent=2))
 

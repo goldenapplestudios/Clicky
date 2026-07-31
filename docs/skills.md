@@ -34,7 +34,7 @@ mindmap
       network-pivoting
     Management
       session-management
-      attack-decision-tree
+      htb-decision-tree
       tool-management
       report-generation
 ```
@@ -113,8 +113,8 @@ Used by `source-analyzer-agent` (see [Agents](agents.md#source-analyzer-agent)) 
 | Script | Purpose |
 |--------|---------|
 | `source-scanner.sh acquire` | Local path, `git clone`, or reconstruction from an exposed `.git` (falls back to git-dumper/GitTools) |
-| `source-scanner.sh scan` | Regex/proximity taint-style scan: SQLi, command/code injection, XSS, path traversal, SSRF, hardcoded secrets |
-| `dependency-scanner.sh` | Wraps `trivy fs` (preferred) or per-ecosystem tools (`npm audit`, `pip-audit`, `bundler-audit`, `govulncheck`) for known-CVE dependencies |
+| `source-scanner.sh scan` | Prefers Semgrep (AST-based, bundled offline ruleset) when installed; falls back to a regex/proximity taint-style scan: SQLi, command/code injection, XSS, path traversal, SSRF, hardcoded secrets |
+| `dependency-scanner.sh` | Wraps `trivy fs` (preferred) or per-ecosystem tools (`npm audit`, `pip-audit`, `bundler-audit`, `govulncheck`) for known-CVE dependencies, enriched with EPSS exploit-prediction scores and CISA KEV (known-exploited) status when reachable |
 
 Findings carry a `confidence` of `high` (source and sink both matched) or `low` (sink only, no clear source in range) - report accordingly, never as confirmed. A manifest with no matching scanner installed is reported as "could not check" (`skipped`), never as "no vulnerabilities found." See `docs/workflow.md` for how these findings flow through the same Tier 1/Tier 2 validation pipeline as any other claimed finding once `exploit-agent` acts on them.
 
@@ -374,7 +374,7 @@ credentials: object
 access_level: none|user|root
 ```
 
-### attack-decision-tree
+### htb-decision-tree
 
 Attack logic derived from pentesting research.
 

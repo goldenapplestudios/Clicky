@@ -110,9 +110,17 @@ python3 "$(dirname "${BASH_SOURCE[0]}")/dependency_normalize.py" "$WORK" \
     --skipped "$(IFS='|'; echo "${skipped[*]:-}")" \
     > "$WORK/normalized.json"
 
+# CVE exploitability enrichment (EPSS score + CISA KEV listed status) - the
+# first network-dependent step in this skill. Never fails the parent scan:
+# dependency_enrich.py catches any network error itself, records it in the
+# output's "enrichment_skipped" array, and still exits 0 with the
+# vulnerabilities list intact but unenriched.
+python3 "$(dirname "${BASH_SOURCE[0]}")/dependency_enrich.py" "$WORK/normalized.json" \
+    > "$WORK/enriched.json"
+
 if [ -n "$OUTPUT" ]; then
-    cp "$WORK/normalized.json" "$OUTPUT"
+    cp "$WORK/enriched.json" "$OUTPUT"
     echo "Dependency scan results written -> $OUTPUT" >&2
 else
-    cat "$WORK/normalized.json"
+    cat "$WORK/enriched.json"
 fi

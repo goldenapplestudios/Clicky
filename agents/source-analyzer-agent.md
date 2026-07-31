@@ -42,7 +42,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/source-code-analysis/scripts/source-scanner.sh scan
   --dir "<the acquired directory>" --output "$SESSION_DIR/recon/source_findings.json"
 ```
 
-This is regex/proximity-based (a dangerous sink pattern with an untrusted-input pattern nearby in the same file), not real dataflow or AST analysis. It covers command injection, code injection (`eval`/`pickle.loads`/insecure `yaml.load`/`unserialize`), SQL injection (SQL keyword + string-concatenation heuristic, including PHP's `.` operator), XSS, path traversal/LFI, SSRF, and hardcoded secrets (private keys, AWS keys, API keys, hardcoded passwords, DB connection strings with embedded credentials). Every finding needs the confidence it's given respected: `high` means a source pattern was found nearby, `low` means only the sink was found with no obvious source in range - report `low`-confidence findings as leads, not confirmed vulnerabilities.
+Prefers Semgrep (real AST-based static analysis, via the bundled offline ruleset at `skills/source-code-analysis/references/semgrep-ruleset.yml`) when installed; falls back to this repo's own regex/proximity heuristic scanner otherwise (a dangerous sink pattern with an untrusted-input pattern nearby in the same file - not real dataflow or AST analysis). Check the output's `scanner` field to see which one ran. Either way it covers command injection, code injection (`eval`/`pickle.loads`/insecure `yaml.load`/`unserialize`), SQL injection (SQL keyword + string-concatenation heuristic, including PHP's `.` operator), XSS, path traversal/LFI, SSRF, and hardcoded secrets (private keys, AWS keys, API keys, hardcoded passwords, DB connection strings with embedded credentials). Every finding needs the confidence it's given respected: for the regex fallback, `high` means a source pattern was found nearby and `low` means only the sink was found; for Semgrep, `high`/`low` reflects the matched rule's severity. Report `low`-confidence findings as leads, not confirmed vulnerabilities.
 
 ## Step 3: Dependency Scan
 
@@ -51,11 +51,11 @@ ${CLAUDE_PLUGIN_ROOT}/skills/source-code-analysis/scripts/dependency-scanner.sh 
   --dir "<the acquired directory>" --output "$SESSION_DIR/recon/dependency_findings.json"
 ```
 
-Prefers `trivy fs` (covers npm/pip/gem/go from whatever lockfiles it finds); falls back to native per-ecosystem tools (`npm audit`, `pip-audit`, `bundler-audit`, `govulncheck`) for whichever are actually installed. A manifest found with no matching tool available shows up in the result's `skipped` array - report that as "could not check," never as "no vulnerabilities found."
+Prefers `trivy fs` (covers npm/pip/gem/go from whatever lockfiles it finds); falls back to native per-ecosystem tools (`npm audit`, `pip-audit`, `bundler-audit`, `govulncheck`) for whichever are actually installed. A manifest found with no matching tool available shows up in the result's `skipped` array - report that as "could not check," never as "no vulnerabilities found." Every CVE-shaped finding is additionally enriched with `epss_score`/`epss_percentile` and `cisa_kev_listed` where reachable (see `skills/source-code-analysis/SKILL.md`) - surface a CISA-KEV-listed or high-EPSS dependency prominently in your report, the same way a `maps_to_service` source finding gets prioritized below.
 
 ## Step 4: Merge and Prioritize
 
-Combine both scans' output into your final report (schema below). For each source-to-sink finding, if you can identify which live service/endpoint it corresponds to (e.g. a Flask route decorator above the vulnerable function, an Express route registration, a URL pattern in a PHP file's path), populate `suggested_attack_vector.maps_to_service` - this is what lets `decision-agent` promote it above a black-box guess. If you can't confidently map it to a specific port/path, leave `maps_to_service` unset rather than guessing.
+Combine both scans' output into your final report (schema below). For each source-to-sink finding, if you can identify which live service/endpoint it corresponds to (e.g. a Flask route decorator above the vulnerable function, an Express route registration, a URL pattern in a PHP file's path), populate `suggested_attack_vector.maps_to_service` - this is what lets `decision-agent` promote it above a black-box guess. If you can't confidently map it to a specific port/path, leave `maps_to_service` unset rather than guessing. Dependency findings that are `cisa_kev_listed: true` or carry a high `epss_score` deserve the same promotion, on the same "known-exploited beats a guess" reasoning.
 
 ## Output Format
 
@@ -93,7 +93,10 @@ Combine both scans' output into your final report (schema below). For each sourc
       "package": "lodash",
       "installed_version": "4.17.4",
       "vulnerability_id": "CVE-2019-10744",
-      "severity": "CRITICAL"
+      "severity": "CRITICAL",
+      "epss_score": 0.05006,
+      "epss_percentile": 0.91371,
+      "cisa_kev_listed": false
     }
   ],
   "dependency_scan_skipped": []

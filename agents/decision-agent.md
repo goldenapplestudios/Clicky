@@ -60,6 +60,8 @@ Check for `$SESSION_DIR/recon/source_findings.json` (written by `source-analyzer
 
 For each finding with a populated `suggested_attack_vector.maps_to_service`, promote it to the very top of `recommended_sequence` in Step 3 below, ahead of anything derived only from black-box scan results - a known sink beats a black-box guess. Findings without `maps_to_service` still belong in your analysis (surface them for `exploit-agent` to consider), they just don't get the priority boost since there's no confirmed live-service correlation yet. Every source-derived recommendation should note it came from source analysis and carries `confidence: "likely"` at best until confirmed live - it's a strong lead, not a finished exploit (this is why it still flows through the normal Tier 1/Tier 2 validation pipeline once `exploit-agent` acts on it, same as any other finding - see `docs/workflow.md`).
 
+Apply the same promotion, on the same "known-exploited beats a guess" reasoning, to any `vulnerable_dependency` finding that's `cisa_kev_listed: true` or carries a high `epss_score` (both populated by `dependency-scanner.sh`'s CVE enrichment step when reachable - see `skills/source-code-analysis/SKILL.md`) - a dependency CISA already lists as actively exploited in the wild is a stronger lead than an unenriched CVE of the same CVSS severity.
+
 ### Step 2: Identify Services
 When categorizing discovered services:
 - **Extract open ports** - Parse scan results to identify all open TCP/UDP ports
