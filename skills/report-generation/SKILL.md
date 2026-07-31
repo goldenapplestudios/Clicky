@@ -51,10 +51,18 @@ Provides standardized penetration testing report generation with vulnerability d
 ## CVSS Scoring
 
 ### CVSS v3.1 Calculator
+
+CVSS 3.1 remains the practical industry anchor as of 2026 even though CVSS 4.0 exists, so score in 3.1 unless the engagement specifically calls for 4.0.
+
 ```bash
-# Run CVSS calculator
-scripts/cvss-calculator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/cvss-calculator.sh \
   --vector "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+```
+
+Or build the vector manually and check it against the [official FIRST.org calculator](https://www.first.org/cvss/calculator/3.1) if you want a second source to compare against.
+
+```
+AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
 
 # CVSS Components:
 # Attack Vector (AV): N=Network, A=Adjacent, L=Local, P=Physical
@@ -86,7 +94,9 @@ None:     0.0
 **Severity**: [Critical/High/Medium/Low]
 **CVSS Score**: [Score] ([Vector String])
 **CWE**: CWE-[Number]
-**OWASP**: A[Number]-[Category]
+**OWASP**: A[Number]:2025-[Category] (or API[Number]:2023-[Category] for API findings — see api-security-testing skill)
+**ASVS**: [Chapter/requirement number] (optional — see OWASP ASVS 5.0 Mapping below; use when the finding maps cleanly to a specific verification requirement)
+**MITRE ATT&CK**: [Technique ID] (optional — only cite when the finding is genuinely an adversary TTP ATT&CK models, e.g. initial access, credential theft, persistence. Most web-app vulnerability classes like IDOR/SSRF/XXE don't have a clean ATT&CK mapping — use OWASP/CWE for those instead of forcing an ID that doesn't fit)
 
 ### Description
 [Detailed description of the vulnerability]
@@ -107,20 +117,38 @@ None:     0.0
 ![Screenshot]({path_to_screenshot})
 
 ### Remediation
+**Root cause**: [The underlying secure-coding principle violated — e.g. "queries built via string concatenation instead of parameterized queries" for SQLi, "missing output encoding at the render boundary" for XSS. Naming the pattern, not just the instance, is what lets developers avoid the same class of bug elsewhere.]
 **Short-term**: [Immediate fixes]
 **Long-term**: [Comprehensive solution]
+
+### Detection Opportunity (optional)
+[What log source or signal would have caught this technique in progress — pulled from the cited MITRE ATT&CK technique's published Detections, when one applies. Skip this field entirely for findings with no ATT&CK mapping rather than forcing one.]
 
 ### References
 - [CVE/Advisory URL]
 - [Vendor Documentation]
 ```
 
+## OWASP ASVS 5.0 Mapping
+
+The [OWASP Application Security Verification Standard](https://asvs.dev/) (v5.0, May 2025 — 17 chapters, ~350 requirements) is a different kind of standard than Top 10: Top 10 is "what's most commonly exploited," ASVS is "does this application meet a baseline of security requirements at all." Use it when a finding represents a missing control rather than a specific exploitable bug — it gives remediation guidance something concrete and verifiable to point at, beyond "here's the bug, go fix it."
+
+Chapters most relevant to typical pentest findings:
+- **V6 Authentication** — credential-related findings (weak passwords, missing MFA, session fixation)
+- **V7 Session Management** — session token predictability, missing session invalidation
+- **V8 Authorization** — IDOR, BFLA, privilege escalation findings
+- **V11 Cryptography** — weak encryption, hardcoded keys, insecure random number generation
+- **V13 Configuration** — security misconfiguration findings
+- **V14 Data Protection** — sensitive data exposure
+
+Cite the chapter (and specific requirement number where you can identify one) in the vulnerability template's ASVS field above; don't force a citation where the finding doesn't map cleanly to a verification requirement.
+
 ## Evidence Collection
 
 ### Screenshot Management
 ```bash
 # Capture evidence
-scripts/evidence-collector.py screenshot --tag "sqli" --vuln "VULN-001"
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/evidence-collector.py screenshot --tag "sqli" --vuln "VULN-001"
 
 # Organize screenshots
 /evidence/
@@ -139,7 +167,7 @@ echo "# Command: nmap -sV target" > evidence/nmap_scan.md
 nmap -sV target >> evidence/nmap_scan.md
 
 # Include in report
-scripts/evidence-collector.py add-output \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/evidence-collector.py add-output \
   --file evidence/nmap_scan.md \
   --section "reconnaissance"
 ```
@@ -149,13 +177,13 @@ scripts/evidence-collector.py add-output \
 ### Generate Full Report
 ```bash
 # Run report generator
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --session-id {session_id} \
   --format markdown \
   --output pentest_report.md
 
 # Generate with all options
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --session-id {session_id} \
   --format pdf \
   --template executive \
@@ -168,7 +196,7 @@ scripts/report-generator.sh \
 
 #### Markdown Report
 ```bash
-scripts/report-generator.sh --format markdown
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh --format markdown
 
 # Sections included:
 - Executive Summary
@@ -180,7 +208,7 @@ scripts/report-generator.sh --format markdown
 
 #### HTML Report
 ```bash
-scripts/report-generator.sh --format html
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh --format html
 
 # Features:
 - Interactive table of contents
@@ -191,7 +219,7 @@ scripts/report-generator.sh --format html
 
 #### PDF Report
 ```bash
-scripts/report-generator.sh --format pdf
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh --format pdf
 
 # Professional features:
 - Cover page
@@ -207,19 +235,19 @@ scripts/report-generator.sh --format pdf
 ```markdown
 ### SQL Injection
 - **CWE-89**: Improper Neutralization of Special Elements
-- **OWASP A03:2021**: Injection
+- **OWASP A05:2025**: Injection
 - **Impact**: Database compromise, data theft
 - **CVSS Base**: 9.8 (Critical)
 
 ### Cross-Site Scripting (XSS)
 - **CWE-79**: Cross-site Scripting
-- **OWASP A03:2021**: Injection
+- **OWASP A05:2025**: Injection
 - **Impact**: Session hijacking, defacement
 - **CVSS Base**: 6.1 (Medium)
 
 ### Authentication Bypass
 - **CWE-287**: Improper Authentication
-- **OWASP A07:2021**: Identification and Authentication Failures
+- **OWASP A07:2025**: Authentication Failures
 - **Impact**: Unauthorized access
 - **CVSS Base**: 8.2 (High)
 ```
@@ -256,7 +284,7 @@ scripts/report-generator.sh --format pdf
 ### Key Metrics
 ```bash
 # Generate metrics
-scripts/report-generator.sh metrics
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh metrics
 
 # Output:
 - Total vulnerabilities: 27
@@ -271,10 +299,9 @@ scripts/report-generator.sh metrics
 
 ### Regulatory Compliance
 ```markdown
-## PCI DSS Compliance
-- **Requirement 2.1**: Default passwords changed ❌
-- **Requirement 6.5**: Secure coding violations found ❌
-- **Requirement 11.3**: Penetration test conducted ✓
+## PCI DSS v4.0.1 Compliance
+- **Illustrative example only** — PCI DSS v4.0.1 (current since 2024/2025, superseding v3.2.1) renumbered requirements significantly. Look up the actual current requirement numbers in the official PCI SSC "Summary of Changes from v3.2.1 to v4.0" document rather than assuming the old numbering still applies; do not cite specific requirement numbers without verifying them against that document first.
+- Example finding shape: **[Requirement N.N]**: [what was tested] [✓/❌]
 
 ## HIPAA Compliance
 - **§164.308(a)(1)**: Security risk assessment ✓
@@ -290,7 +317,7 @@ scripts/report-generator.sh metrics
 ### Priority Matrix
 ```bash
 # Generate priority matrix
-scripts/report-generator.sh priorities
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh priorities
 
 Priority 1 (Immediate):
 - [ ] Patch critical RCE vulnerability (CVE-2024-XXX)
@@ -312,24 +339,26 @@ Priority 3 (90 days):
 
 ### Pre-Delivery Checklist
 ```bash
-# Run quality checks
-scripts/report-generator.sh validate
+# Text-lint a rendered report file (CVSS mentioned, evidence/PoC present,
+# remediation included, no obvious cleartext creds left in)
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh validate --input report.md
 
-Validation Checks:
-✓ All findings have CVSS scores
-✓ Evidence provided for each finding
-✓ Remediation guidance included
-✓ No sensitive data exposed
-✓ Client information accurate
-✓ Spell check passed
-✓ Grammar check passed
-✓ Formatting consistent
+# Structurally validate findings.json for a session: any CRITICAL/HIGH
+# finding that failed Tier 1 trace validation or was refuted by Tier 2
+# review (see docs/workflow.md) is a hard FAIL, regardless of what the
+# rendered report text says
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh validate --session-id "$SESSION_ID"
+
+# Both flags can be combined in one call. `generate` itself always splits
+# output into "Confirmed Findings" and "Unverified / Needs Manual Review"
+# sections based on the same validation data - nothing unverified is ever
+# presented as confirmed.
 ```
 
 ### Sensitive Data Sanitization
 ```bash
 # Sanitize report
-scripts/report-generator.sh sanitize \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh sanitize \
   --input draft_report.md \
   --output sanitized_report.md
 
@@ -345,28 +374,28 @@ scripts/report-generator.sh sanitize \
 
 ### Penetration Test Report
 ```bash
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --template pentest \
   --include-sections "exec,technical,appendix"
 ```
 
 ### Vulnerability Assessment Report
 ```bash
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --template vuln-assessment \
   --include-sections "summary,vulnerabilities,recommendations"
 ```
 
 ### Red Team Report
 ```bash
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --template red-team \
   --include-sections "objectives,timeline,ttp,detection"
 ```
 
 ### Web Application Assessment
 ```bash
-scripts/report-generator.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh \
   --template webapp \
   --include-sections "owasp,vulnerabilities,code-review"
 ```
@@ -374,13 +403,12 @@ scripts/report-generator.sh \
 ## Integration with Session Data
 
 ### Extract Session Findings
-```bash
-# Pull data from session
-SESSION_ID=$(scripts/session-manager.sh current)
-SESSION_DIR="$HOME/.claude/sessions/$SESSION_ID"
 
+`$SESSION_ID`/`$SESSION_DIR` are set earlier in the workflow (`commands/pentest.md` Step 1 exports them) — there's no "get the current session" lookup, use the values already in the environment.
+
+```bash
 # Aggregate findings
-scripts/report-generator.sh aggregate \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh aggregate \
   --session $SESSION_ID \
   --output findings.json
 ```
@@ -388,12 +416,31 @@ scripts/report-generator.sh aggregate \
 ### Automatic Report Population
 ```bash
 # Auto-populate from session
-scripts/report-generator.sh auto \
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh auto \
   --session $SESSION_ID \
   --detect-vulns \
   --calculate-cvss \
   --collect-evidence
 ```
+
+## Session Review (Internal — Trace Log Analysis)
+
+Every tool call and subagent completion during a `/pentest` run is logged to a JSONL trace file by hooks (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`), so a run can be walked back through afterward — this is for improving Clicky itself, not something that belongs in the client-facing report above.
+
+```bash
+# Review the most recent run
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh
+
+# Review a specific run by Claude Code session ID
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh <claude_session_id>
+
+# Review a specific trace file directly
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh ~/.claude/pentest-traces/<claude_session_id>.jsonl
+```
+
+Output includes a chronological walk-through of every tool call and subagent completion, and a summary of failures grouped by agent. Use this to compare real outcomes against the HTB baseline success rates in `decision-agent`'s decision tree, and to feed generalized learnings into its persistent memory (see `docs/agents.md`) — the trace log is the raw ground truth; memory is what gets distilled from it once a pattern repeats across engagements.
+
+For deeper, queryable analysis across many engagements (not just one run), see `docs/observability.md` for Claude Code's built-in OpenTelemetry support.
 
 ## Professional Formatting
 
