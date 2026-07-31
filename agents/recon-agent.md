@@ -151,8 +151,9 @@ curl -X POST http://{target_IP}/graphql \
   -H "Content-Type: application/json" \
   -d '{"query":"{ __schema { types { name } } }"}'
 
-# REST API enumeration with ffuf
-ffuf -w /usr/share/wordlists/api-endpoints.txt -u http://{target_IP}/api/FUZZ
+# REST API enumeration - see skills/fuzzing for the full tool cascade
+${CLAUDE_PLUGIN_ROOT}/skills/fuzzing/scripts/fuzz.sh param --url "http://{target_IP}/api/?x=1" \
+  --output "$SESSION_DIR/recon/fuzz_api_params_{target_IP}.json"
 
 # API versioning check
 for v in v1 v2 v3 api/v1 api/v2; do
@@ -163,6 +164,15 @@ done
 curl http://{target_IP}/.well-known/openid-configuration
 curl http://{target_IP}/oauth/authorize
 curl http://{target_IP}/oauth/token
+
+# LLM-app endpoint detection - if any of these respond (not a plain 404),
+# set llm_endpoint_detected: true in your output. This opportunistically
+# triggers exploit-agent to invoke skills/ai-llm-security-testing, the
+# same "probe already runs, essentially zero extra cost" pattern as the
+# git_exposure_detected check below.
+curl -s -o /dev/null -w "%{http_code}" -X POST http://{target_IP}/v1/chat/completions
+curl -s -o /dev/null -w "%{http_code}" -X POST http://{target_IP}/api/chat
+curl -s -o /dev/null -w "%{http_code}" -X POST http://{target_IP}/api/generate
 ```
 
 ### Phase 6: Deep Enumeration
@@ -244,6 +254,7 @@ Return a structured JSON report with MITRE ATT&CK mapping:
   "scan_time": "TIMESTAMP",
   "environment_type": "standard|active_directory|cloud|container|hybrid",
   "git_exposure_detected": false,
+  "llm_endpoint_detected": false,
   "services": [
     {
       "port": 21,

@@ -626,7 +626,7 @@ This is about *this* application's blind trust in the *third-party* APIs it call
 
 ## 2025 Trends
 
-- **AI/LLM APIs** - Prompt injection, model extraction
+- **AI/LLM APIs** - see `skills/ai-llm-security-testing` for prompt injection/jailbreak probes (canary-token detection) and an OWASP LLM Top 10 checklist
 - **Blockchain APIs** - Smart contract interaction, key management
 - **IoT APIs** - MQTT, CoAP protocols
 - **Edge Computing APIs** - Distributed API gateways

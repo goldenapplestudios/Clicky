@@ -23,6 +23,7 @@ mindmap
     Exploitation
       web-vulnerability-testing
       api-security-testing
+      ai-llm-security-testing
       credential-harvesting
       web-auth-capture
       active-directory
@@ -174,6 +175,10 @@ API attack techniques.
 | OAuth | Flow analysis | Token theft |
 
 **MITRE Techniques**: T1550.001 (JWT/token theft). Most API-specific vulnerability classes (IDOR, mass assignment, CORS, SSRF) don't have clean MITRE ATT&CK mappings — ATT&CK models adversary behavior, not web-app vulnerability taxonomy. See the [OWASP API Security Top 10](skills.md#api-security-testing) mapping in `api-security-testing/SKILL.md` instead.
+
+### ai-llm-security-testing
+
+AI/LLM application security testing: prompt injection and jailbreak probes via canary-token detection (a freshly generated unique token is substituted into a payload; a hard pass/fail is whether that exact token shows up in the response), system-prompt-extraction probes (no automated verdict - response is captured for manual review), and an OWASP LLM Top 10 checklist for categories that don't reduce to a scriptable black-box probe (training data poisoning, model theft, supply chain, excessive agency, overreliance). Findings use a deliberate `owasp_llm` field instead of `mitre_attack` - ATT&CK IDs don't map cleanly to this domain either. See `skills/ai-llm-security-testing/SKILL.md`.
 
 ### credential-harvesting
 
