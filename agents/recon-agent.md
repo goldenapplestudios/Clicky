@@ -53,12 +53,12 @@ Before attempting enumeration, check if we've already tried these services:
 
 ```bash
 # Initialize state persistence
-~/.claude/skills/session-management/scripts/state-persistence.sh init
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh init
 
-# Check for previous failed attempts
-SESSION_ID=$(~/.claude/skills/session-management/scripts/session-manager.sh current)
+# Check for previous failed attempts ($SESSION_ID is already set in the
+# environment from commands/pentest.md's Step 1 - no lookup needed)
 for service in ftp smb http ssh mysql; do
-    if ~/.claude/skills/session-management/scripts/state-persistence.sh check-failed "$service" "enumeration"; then
+    if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "$service" "enumeration"; then
         echo "Note: $service enumeration already attempted and failed"
     fi
 done
@@ -218,6 +218,8 @@ curl http://{target_IP}/.git/config || wget -q -O - http://{target_IP}/.git/conf
 curl http://{target_IP}/.env || wget -q -O - http://{target_IP}/.env
 ```
 
+If `.git/config` returns real content (not a 404/blank), set `git_exposure_detected: true` in your output - this opportunistically triggers `source-analyzer-agent` (see `commands/pentest.md`) to pull and analyze the exposed source, at essentially zero extra recon cost since this probe already runs. Don't attempt the source acquisition/analysis yourself - that's a distinct agent with its own skill (`source-code-analysis`).
+
 #### For SSH (Port 22):
 ```bash
 # Get banner
@@ -239,6 +241,7 @@ Return a structured JSON report with MITRE ATT&CK mapping:
   "target": "IP_ADDRESS",
   "scan_time": "TIMESTAMP",
   "environment_type": "standard|active_directory|cloud|container|hybrid",
+  "git_exposure_detected": false,
   "services": [
     {
       "port": 21,
