@@ -1,0 +1,21 @@
+---
+name: resume
+description: Resume a previously created pentest session, restoring its SESSION_ID/SESSION_DIR/target for subsequent commands
+argument-hint: "<session_id>"
+arguments: [session_id]
+disable-model-invocation: false
+allowed-tools: Bash(mkdir:*), Bash(ls:*), Bash(cat:*), Bash(echo:*), Bash(grep:*), Bash(find:*), Bash(head:*), Bash(tail:*), Read(*), Write(*), Grep(*)
+model: sonnet
+---
+
+# Resume Pentest Session
+
+Session ID: **$session_id**
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh resume "$session_id"
+```
+
+`resume_session()` `export`s `SESSION_ID`/`SESSION_DIR`/`TARGET` internally, but that only persists within the single shell process that ran it - a Bash tool call doesn't share process state with the next one. **After running the command above, read its three printed lines** (`Session resumed: ...`, `Target: ...`, `Session directory: ...`) and carry those literal values forward as `$SESSION_ID`/`$SESSION_DIR`/`$TARGET` in every subsequent Bash call this turn - exactly the same convention `commands/pentest.md` Step 1 already uses for a freshly-created session.
+
+If the command reports "Session not found," the ID was likely mistyped, or belongs to an archived session - archived sessions can't be resumed for further work (they're moved out of the active session tree by `archive_session()`); use `/clicky:sessions <session_id>` to check its status instead, or start a fresh `/clicky:pentest` run if the engagement needs to continue.

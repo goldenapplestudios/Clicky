@@ -1,0 +1,44 @@
+---
+name: sessions
+description: List active pentest sessions, or show detailed status for one (active or archived) session
+argument-hint: "[session_id]"
+arguments: [session_id]
+disable-model-invocation: false
+allowed-tools: Bash(mkdir:*), Bash(ls:*), Bash(cat:*), Bash(echo:*), Bash(grep:*), Bash(find:*), Bash(head:*), Bash(tail:*), Read(*), Write(*), Grep(*)
+model: sonnet
+---
+
+# Session Status
+
+Session ID (optional): **$session_id**
+
+`session-manager.sh`'s `resume`/`list`/`archive` subcommands are fully implemented but have no exposed interface anywhere else in the plugin - this command, `/clicky:resume`, and `/clicky:archive` are that interface.
+
+## No session ID given: list active sessions
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh list
+```
+
+This only shows **active** sessions - `list_sessions()` doesn't descend into the `archived/` subdirectory (intentional: an archived session is no longer "in progress"). To check an archived session's status, pass its ID explicitly below.
+
+## Session ID given: detailed status
+
+```bash
+SESSION_BASE="${user_config.default_session_directory}"
+SESSION_BASE="${SESSION_BASE:-$HOME/.claude/sessions}"
+
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh info "$session_id"
+```
+
+`info` (via `get_session_info()`) checks both `$SESSION_BASE/$session_id` and `$SESSION_BASE/archived/$session_id`, so this works whether the session is active or archived - no need to know which ahead of time.
+
+If findings exist for this session, also show a quick metrics summary:
+```bash
+if [ -f "$SESSION_BASE/$session_id/reports/findings.json" ] || [ -f "$SESSION_BASE/archived/$session_id/reports/findings.json" ]; then
+    ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh metrics --session-id "$session_id"
+fi
+```
+(`report-generator.sh`'s own session resolution has the same active/archived fallback, so this works either way too.)
+
+If `session-manager.sh info` reports "Session not found," say so plainly rather than guessing at a typo or a different ID.

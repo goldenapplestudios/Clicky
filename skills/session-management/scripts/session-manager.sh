@@ -178,9 +178,18 @@ log_finding() {
 }
 
 # Function to get session info
+#
+# Checks the archived/ subdirectory as a fallback - archive_session() moves
+# a session's whole directory there, so a bare $SESSION_BASE/$session_id
+# lookup alone would report "not found" for any archived session even
+# though its data still exists.
 get_session_info() {
     local session_id="$1"
     local session_dir="$SESSION_BASE/$session_id"
+
+    if [ ! -d "$session_dir" ] && [ -d "$SESSION_BASE/archived/$session_id" ]; then
+        session_dir="$SESSION_BASE/archived/$session_id"
+    fi
 
     if [ ! -d "$session_dir" ]; then
         echo "ERROR: Session not found: $session_id"

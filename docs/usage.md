@@ -343,13 +343,10 @@ Example: `pentest_20251126_143022_10_10_10_10`
 
 ### Finding Your Session
 
-```bash
-# List recent sessions
-ls -la ~/.claude/sessions/
-
-# Find session for specific target
-ls ~/.claude/sessions/ | grep "10_10_10"
 ```
+/clicky:sessions
+```
+Lists active sessions with their target, phase, and start time. Pass a session ID for detailed status (works for archived sessions too): `/clicky:sessions pentest_20251126_143022_10_10_10_10`.
 
 ### Session Persistence
 
@@ -684,18 +681,24 @@ skills/my-custom-skill/
 
 #### Creating Custom Commands
 
-Add commands to `commands/`:
+Add commands to `commands/`, following `commands/pentest.md`'s real frontmatter convention (also used by `sessions.md`/`resume.md`/`archive.md`) - not a `{{TARGET}}`-style template, but `arguments:` naming positional args that then get referenced as `$target`-style variables in the body:
 
 ```markdown
 ---
 name: quick-scan
 description: Fast reconnaissance only
+argument-hint: "<target>"
+arguments: [target]
+disable-model-invocation: true
 allowed-tools: Bash(nmap:*), Read(*), Write(*)
+model: sonnet
 ---
 
 # Quick Scan
 
-Perform fast reconnaissance on {{TARGET}} without exploitation.
+Target: **$target**
+
+Perform fast reconnaissance on $target without exploitation.
 Only scan top 1000 ports and identify services.
 ```
 
@@ -752,6 +755,10 @@ Each maintains its own session and state.
 | `/pentest <ip> "creds"` | With credentials | `/pentest 10.10.10.10 "user: admin, pass: admin"` |
 | `/pentest <domain>` | Domain target | `/pentest example.com` |
 | `/pentest <ip> "cloud: X"` | Cloud target | `/pentest 10.10.10.10 "cloud: AWS"` |
+| `/clicky:pentest-parallel <target>` | Same workflow, concurrent service checks | `/clicky:pentest-parallel 10.10.10.10` (see [Workflow](workflow.md)) |
+| `/clicky:sessions [id]` | List active sessions, or show one's status | `/clicky:sessions` |
+| `/clicky:resume <id>` | Resume a session for further work | `/clicky:resume pentest_20251126_143022_10_10_10_10` |
+| `/clicky:archive <id>` | Archive a completed session | `/clicky:archive pentest_20251126_143022_10_10_10_10` |
 
 ### Context Keys Reference
 

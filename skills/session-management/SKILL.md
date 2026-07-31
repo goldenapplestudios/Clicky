@@ -17,12 +17,26 @@ Execute session creation for new targets:
 # Create new session - returns SESSION_ID
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh create "{target_ip}"
 
-# Resume existing session
+# Resume existing session - exports SESSION_ID/SESSION_DIR/TARGET, but only
+# within the shell process that runs it; a separate Bash tool call doesn't
+# inherit them, so the caller must capture and re-carry the printed values
+# (see commands/resume.md)
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh resume "{session_id}"
 
-# List all sessions
+# List all ACTIVE sessions - does not descend into archived/, by design
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh list
+
+# Get status for one session, active or archived (checks archived/ as a
+# fallback if the plain path doesn't exist)
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh info "{session_id}"
+
+# Archive a completed session - moves its whole directory under archived/,
+# marks it completed, and clears the .current-session pointer if it was
+# pointing at this session
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh archive "{session_id}"
 ```
+
+These four subcommands are exposed as slash commands - `/clicky:sessions` (list/status), `/clicky:resume`, `/clicky:archive` - rather than needing to be invoked as raw Bash calls by an operator.
 
 ### State Persistence
 Track and persist agent states throughout the engagement - see "Integration with Agents" below for the full store/check-failed/record pattern agents actually use:

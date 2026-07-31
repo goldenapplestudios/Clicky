@@ -135,6 +135,9 @@ Commands are defined in `commands/` as markdown files.
 
 - `/pentest <target> ["context"]` - Primary pentesting command (namespaced as `/clicky:pentest` once installed as a plugin)
 - `/clicky:pentest-parallel <target> ["context"]` - Dynamic-workflow equivalent that fans independent service checks out concurrently (see [Workflow](docs/workflow.md))
+- `/clicky:sessions [session_id]` - List active sessions, or show detailed status for one (active or archived)
+- `/clicky:resume <session_id>` - Resume a session for further work
+- `/clicky:archive <session_id>` - Archive a completed session
 
 ### Skills (21)
 

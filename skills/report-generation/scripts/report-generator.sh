@@ -19,7 +19,15 @@ set -uo pipefail
 SESSION_BASE="${CLAUDE_PLUGIN_OPTION_DEFAULT_SESSION_DIRECTORY:-$HOME/.claude/sessions}"
 
 session_dir_for() {
-    echo "$SESSION_BASE/$1"
+    local dir="$SESSION_BASE/$1"
+    # Fall back to the archived/ subdirectory - archive_session() (in
+    # session-management/scripts/session-manager.sh) moves a session's
+    # whole directory there, so a bare $SESSION_BASE/$1 lookup alone would
+    # silently see "no findings.json" for any archived session.
+    if [ ! -d "$dir" ] && [ -d "$SESSION_BASE/archived/$1" ]; then
+        dir="$SESSION_BASE/archived/$1"
+    fi
+    echo "$dir"
 }
 
 findings_file_for() {
