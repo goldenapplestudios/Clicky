@@ -1,0 +1,2 @@
+{"event": "PostToolUse", "clicky_session_dir": "__SESSION_DIR__", "tool_input": {"command": "sqlmap -u http://__SESSION_TARGET__/login.php?id=1 --dump"}, "tool_result": {"is_error": false}}
+{"event": "PostToolUseFailure", "clicky_session_dir": "__SESSION_DIR__", "tool_input": {"command": "ftp -n __SESSION_TARGET__ anonymous-login-script"}, "error": "connection refused"}

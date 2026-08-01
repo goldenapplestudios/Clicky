@@ -277,13 +277,13 @@ This version information is critical for finding exploits.
 
 ### Priority Assignment Logic
 
-The Recon Agent assigns priorities based on success rates from pentesting research:
+The Recon Agent's priority ordering comes from `skills/htb-decision-tree`'s self-calibrated data - real measured success rates from this operator's own accumulated session history where enough exist, honest heuristic ordering otherwise (see `service-prioritizer.py --show-matrix`, not a static table here - an earlier version of this doc claimed specific fixed percentages "from pentesting research," which turned out to have no backing dataset and disagreed with itself across multiple files):
 
 | Condition | Priority | Reasoning |
 |-----------|----------|-----------|
-| FTP + Anonymous access | P1 | 100% success, often contains credentials |
-| SMB + Null session | P1 | 75% success, reveals users and files |
-| HTTP + CMS detected | P2 | 85% success, many known vulnerabilities |
+| FTP + Anonymous access | P1 | Often contains credentials; check current calibrated rate via `service-prioritizer.py --show-matrix` |
+| SMB + Null session | P1 | Reveals users and files |
+| HTTP + CMS detected | P2 | Many known vulnerabilities |
 | SSH (no creds yet) | P3 | Need credentials from other sources |
 | Unknown service | P4 | Requires manual investigation |
 
@@ -303,13 +303,13 @@ The Decision Agent is the **strategist**. It takes reconnaissance data and creat
 
 Decision Agent is the only agent with persistent memory (`memory: user` in its frontmatter, scoped to the operator rather than any one target or working directory). It's the natural place for this: it's analysis-only by charter — it never runs exploitation commands or handles raw credentials/loot directly, just summarized service and vulnerability data it's handed — so it's the agent least likely to accidentally conflate a generalizable lesson with a target's actual secrets.
 
-Its memory is meant for *generalized* technique-effectiveness learning across engagements ("SMB null session succeeded against Samba 4.x in 6/8 observed engagements") — never for anything target-identifying (IPs, hostnames, credentials, client details). The agent's own frontmatter documents this boundary explicitly and is instructed to consult memory before analysis and update it after. Over time this is meant to let the static HTB decision tree below get refined by real, observed outcomes rather than staying frozen at its original one-time analysis.
+Its memory is meant for *generalized* technique-effectiveness learning across engagements at a finer grain than the formal calibration mechanism can capture ("SMB null session succeeded against Samba 4.x in 6/8 observed engagements" - a version-specific pattern) — never for anything target-identifying (IPs, hostnames, credentials, client details). The agent's own frontmatter documents this boundary explicitly and is instructed to consult memory before analysis and update it after. This is complementary qualitative color layered on top of `skills/htb-decision-tree`'s own quantitative self-calibration (`skills/session-management/scripts/attempt-aggregator.sh`, fed by every agent's logged attempts) - the coarse per-service/technique success rates themselves are real computed data, not something decision-agent's memory needs to supply.
 
 The other five agents don't have persistent memory yet — they handle credentials, hostnames, and loot as their normal job, which makes the same safe/never-store boundary much easier to get wrong. Extending memory to them is a deliberate future decision, not an oversight.
 
 ### The Decision Tree
 
-This decision tree is based on **pentesting research**. It's not guesswork - it's what actually works.
+This decision tree's shape (which service to check first, what to do on success/failure) is a reasonable heuristic starting point; the priority *weighting* behind it is self-calibrated from this operator's own accumulated session history (`skills/htb-decision-tree`), not a fixed research citation - see that skill's SKILL.md for how the calibration mechanism works and why an earlier version of this claim (asserting specific fabricated percentages as "pentesting research") didn't hold up.
 
 ```mermaid
 flowchart TD
@@ -344,7 +344,7 @@ flowchart TD
 
 The Decision Agent doesn't just pick one attack. It creates a **chain** - a sequence of attacks where each step enables the next.
 
-**Chain A: Credential Hunting** (85% success rate)
+**Chain A: Credential Hunting**
 
 ```text
 1. Anonymous FTP → Download files
@@ -353,7 +353,7 @@ The Decision Agent doesn't just pick one attack. It creates a **chain** - a sequ
 4. If access: Proceed to privesc
 ```
 
-**Chain B: Web Exploitation** (75% success rate)
+**Chain B: Web Exploitation**
 
 ```text
 1. Enumerate web application
@@ -362,7 +362,7 @@ The Decision Agent doesn't just pick one attack. It creates a **chain** - a sequ
 4. If access: Proceed to privesc
 ```
 
-**Chain C: Default Credentials** (100% when applicable)
+**Chain C: Default Credentials**
 
 ```text
 1. Identify service (MySQL, Tomcat, etc.)

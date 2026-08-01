@@ -363,9 +363,13 @@ ${CLAUDE_PLUGIN_ROOT}/skills/service-enumeration/scripts/service-correlator.py -
 `$SESSION_ID` is set earlier in the workflow (`commands/pentest.md` Step 1 exports it) — use the value already in the environment.
 
 ```bash
-# Store enumeration results
-${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
-  "$SESSION_ID" "services" "{service_name}" "{version_info}" true
+# Store enumeration results as a discovery, not an attempt outcome -
+# `record` is specifically for attack-attempt success/failure (the data
+# skills/session-management/scripts/attempt-aggregator.sh calibrates
+# htb-decision-tree's rates from); a plain service discovery isn't an
+# attempt, so it uses `store` instead. See skills/session-management/SKILL.md.
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh store \
+  "services" '{"service":"{service_name}","version":"{version_info}"}' "$SESSION_ID"
 ```
 
 ### Credential Testing

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Heuristic starting priority order, NOT measured success rates. weight is an ordinal 0-1 value used only to rank services and combine them mechanically before real data exists - never present it to an operator as a percentage or as research-derived. Superseded per-service once skills/session-management/scripts/attempt-aggregator.sh has >= min_sample_threshold real attempts for that service, via skills/htb-decision-tree/scripts/priority_data.py.",
+  "min_sample_threshold": 5,
+  "services": [
+    {"service": "ftp", "display_name": "FTP", "ports": [21], "tier": "high", "weight": 0.9, "notes": "Anonymous access, credential files"},
+    {"service": "redis", "display_name": "Redis", "ports": [6379], "tier": "high", "weight": 0.85, "notes": "Unauthenticated access common"},
+    {"service": "docker", "display_name": "Docker", "ports": [2375, 2376], "tier": "high", "weight": 0.8, "notes": "API exposure, container escape"},
+    {"service": "mongodb", "display_name": "MongoDB", "ports": [27017], "tier": "high", "weight": 0.75, "notes": "No authentication common"},
+    {"service": "elasticsearch", "display_name": "Elasticsearch", "ports": [9200], "tier": "medium", "weight": 0.65, "notes": "No authentication, data exposure"},
+    {"service": "smb", "display_name": "SMB", "ports": [445, 139], "tier": "medium", "weight": 0.6, "notes": "Null sessions, user enumeration"},
+    {"service": "http", "display_name": "HTTP/HTTPS", "ports": [80, 443], "tier": "medium", "weight": 0.5, "notes": "Web vulnerabilities, default creds - highly target-dependent"},
+    {"service": "mysql", "display_name": "MySQL", "ports": [3306], "tier": "medium", "weight": 0.4, "notes": "Default/blank root, UDF exploitation"},
+    {"service": "ssh", "display_name": "SSH", "ports": [22], "tier": "low", "weight": 0.3, "notes": "Credential reuse, weak passwords"},
+    {"service": "rdp", "display_name": "RDP", "ports": [3389], "tier": "low", "weight": 0.25, "notes": "BlueKeep, credential attacks"}
+  ]
+}

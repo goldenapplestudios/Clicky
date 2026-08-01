@@ -9,7 +9,7 @@
     {
       "name": "clicky",
       "source": "./",
-      "description": "Multi-agent penetration testing framework: recon, exploitation, privilege escalation, and looting agents driven by decision tree logic from pentesting research."
+      "description": "Multi-agent penetration testing framework: recon, exploitation, privilege escalation, and looting agents driven by attack-priority logic that self-calibrates from the operator's own accumulated session history."
     }
   ]
 }

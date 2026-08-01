@@ -4,11 +4,11 @@
 
 # Clicky - If Claude were a Pentester
 
-A multi-agent penetration testing framework powered by Claude. Clicky orchestrates specialized agents to perform comprehensive security assessments using decision tree logic derived from pentesting research.
+A multi-agent penetration testing framework powered by Claude. Clicky orchestrates specialized agents to perform comprehensive security assessments using attack-priority logic that self-calibrates from your own accumulated session history (real measured success rates once enough data exists, honestly-labeled heuristic ordering until then - see [Skills](docs/skills.md#htb-decision-tree)), not a fixed external dataset claim.
 
 ## Overview
 
-Clicky combines intelligent agent orchestration with attack methodologies derived from pentesting research. It supports traditional infrastructure, cloud environments, containers, APIs, and Active Directory.
+Clicky combines intelligent agent orchestration with attack-priority ordering that self-calibrates from your own session history (see above). It supports traditional infrastructure, cloud environments, containers, APIs, and Active Directory.
 
 ```mermaid
 flowchart LR
@@ -139,7 +139,7 @@ Commands are defined in `commands/` as markdown files.
 - `/clicky:resume <session_id>` - Resume a session for further work
 - `/clicky:archive <session_id>` - Archive a completed session
 
-### Skills (21)
+### Skills (24)
 
 Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories.
 
@@ -156,6 +156,7 @@ See the [docs/](docs/) directory for detailed documentation:
 | [Skills](docs/skills.md) | Available skill modules |
 | [Observability](docs/observability.md) | Trace logs and OpenTelemetry - reviewing what happened in a run |
 | [Sandboxing](docs/sandboxing.md) | Using Claude Code's sandboxed Bash tool alongside Clicky's own scope enforcement |
+| [Competitive Landscape](docs/competitive-landscape.md) | How Clicky compares to real open-source/academic frameworks and commercial platforms in this space, and to published benchmarks |
 
 ## Requirements
 
@@ -167,6 +168,8 @@ See the [docs/](docs/) directory for detailed documentation:
 ## Ethical Use
 
 This framework is for authorized security testing only. Always obtain written permission before testing. Respect scope boundaries and avoid destructive actions.
+
+Ethical safety here is enforced structurally - the `scope-enforcement` hook and the written-authorization requirement above - not by withholding exploitation capability from `exploit-agent`. That agent's full technique coverage (SQLi, AD attacks, container/cloud escapes, API exploitation, etc.) is core, required functionality for a working pentesting tool, on par with what Metasploit or Burp Suite ship; it is in scope for this project and shouldn't be pruned. Prior scope-narrowing in this repo removed the standalone `evasion-techniques` skill (AV/EDR evasion, a different and more detection-evasion-flavored capability) - that decision doesn't extend to `exploit-agent` itself.
 
 ## License
 

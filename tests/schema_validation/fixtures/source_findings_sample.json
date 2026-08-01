@@ -1,0 +1,22 @@
+{
+  "source_location": "/tmp/example-repo",
+  "scanner": "regex_taint_scan",
+  "findings": [
+    {
+      "type": "sql_injection",
+      "file": "app/routes/login.py",
+      "line": 42,
+      "sink": "cursor.execute(query)",
+      "source_of_taint": "request.form['username']",
+      "confidence": "high",
+      "mitre_attack": ["T1190"]
+    },
+    {
+      "type": "hardcoded_secret",
+      "file": "config/settings.py",
+      "line": 7,
+      "secret_type": "aws_access_key",
+      "confidence": "high"
+    }
+  ]
+}

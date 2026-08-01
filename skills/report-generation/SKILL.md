@@ -438,7 +438,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh <claude
 ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh ~/.claude/pentest-traces/<claude_session_id>.jsonl
 ```
 
-Output includes a chronological walk-through of every tool call and subagent completion, and a summary of failures grouped by agent. Use this to compare real outcomes against the HTB baseline success rates in `decision-agent`'s decision tree, and to feed generalized learnings into its persistent memory (see `docs/agents.md`) — the trace log is the raw ground truth; memory is what gets distilled from it once a pattern repeats across engagements.
+Output includes a chronological walk-through of every tool call and subagent completion, and a summary of failures grouped by agent. Use this to sanity-check `skills/htb-decision-tree`'s self-calibrated success rates against what actually happened in this run, and to feed generalized learnings into decision-agent's persistent memory (see `docs/agents.md`) — the trace log is the raw ground truth; memory is what gets distilled from it once a pattern repeats across engagements.
 
 For deeper, queryable analysis across many engagements (not just one run), see `docs/observability.md` for Claude Code's built-in OpenTelemetry support.
 
@@ -499,7 +499,7 @@ qpdf --encrypt {password} {password} 256 -- report.pdf encrypted_report.pdf
 7z a -p{password} -mhe report.7z report.pdf evidence/
 ```
 
-## Interop Export Formats (SARIF / SBOM)
+## Interop Export Formats (SARIF / SBOM / AIBOM)
 
 Separate from this skill's human-facing narrative report - these are for CI/tooling consumers, not readers:
 
@@ -516,9 +516,20 @@ ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/interop-formats.sh sarif 
 # software inventory - don't present it as a complete SBOM.
 ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/interop-formats.sh sbom-partial \
   --session-id "$SESSION_ID" --output "$SESSION_DIR/reports/sbom-partial.cdx.json"
+
+# CycloneDX 1.5 AI/ML-BOM - reads every $SESSION_DIR/recon/llm_probe_*.json
+# (from skills/ai-llm-security-testing's prompt-injection-probe.sh).
+# Deliberately named "aibom-partial", not "aibom", same reasoning as
+# sbom-partial: black-box HTTP probing never sees model architecture,
+# weights, or training provenance, so this is a probe-derived partial
+# component inventory (one machine-learning-model component per probed
+# endpoint, with OWASP LLM Top 10 (2025) coverage recorded per component),
+# not a vendor model card.
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/interop-formats.sh aibom-partial \
+  --session-id "$SESSION_ID" --output "$SESSION_DIR/reports/aibom-partial.cdx.json"
 ```
 
-Both converters (`sarif_convert.py`, `cyclonedx_convert.py`) were validated during development against the real, published SARIF 2.1.0 and CycloneDX 1.5 JSON Schemas, not eyeballed - see their header comments. Both require `source-analyzer-agent` to have run first (white-box analysis), since they convert its output rather than anything black-box testing produces.
+All three converters (`sarif_convert.py`, `cyclonedx_convert.py`, `aibom_convert.py`) are validated against the real, published SARIF 2.1.0 and CycloneDX 1.5 JSON Schemas by an actual re-runnable test - `tests/schema_validation/test_schema_validation.py` (run via `tests/run_all.sh` from the repo root) - not just eyeballed or asserted in prose. `sarif` and `sbom-partial` require `source-analyzer-agent` to have run first (white-box analysis), since they convert its output; `aibom-partial` requires `skills/ai-llm-security-testing` to have run instead (black-box LLM-endpoint probing) - the two are independent, run whichever agents/skills actually executed for a given engagement.
 
 ## Best Practices
 

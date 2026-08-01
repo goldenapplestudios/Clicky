@@ -39,14 +39,23 @@ ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh archi
 These four subcommands are exposed as slash commands - `/clicky:sessions` (list/status), `/clicky:resume`, `/clicky:archive` - rather than needing to be invoked as raw Bash calls by an operator.
 
 ### State Persistence
-Track and persist agent states throughout the engagement - see "Integration with Agents" below for the full store/check-failed/record pattern agents actually use:
+Track and persist agent states throughout the engagement - see "Integration with Agents" below for the full store/check-failed/record pattern agents actually use. `record`/`check-failed`/`summary` are session-scoped: they read/write `$SESSION_DIR/logs/attempts.jsonl`, not a global cross-session file, and `record` takes `$SESSION_ID` as its first argument:
 ```bash
-# Record an attempt's outcome (technique, description, success true/false)
+# Record an attempt's outcome (service, technique, description, success true/false).
+# Log EVERY attempt, not just successes - this is the raw data
+# skills/session-management/scripts/attempt-aggregator.sh reads across every
+# session to compute skills/htb-decision-tree's real success rates, so a
+# rate needs both a numerator (successes) and a denominator (attempts).
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
-  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false
+  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false \
+  --agent "exploit-agent" --port 21
 
-# Check whether a technique already failed, before repeating it
-${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "ftp" "anonymous_login"
+# Optional flags on `record`: --agent NAME, --port N, --severity SEV,
+# --finding-id ID (pass the matching findings.json id on a success so the
+# two records can be cross-referenced later)
+
+# Check whether a technique already failed in THIS session, before repeating it
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "$SESSION_ID" "ftp" "anonymous_login"
 
 # Get a session-wide summary of everything recorded so far
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh summary "$SESSION_ID"
@@ -76,7 +85,11 @@ All sessions are organized under `$HOME/.claude/sessions/{session_id}/` (or wher
 ├── loot/                # Extracted credentials and files
 ├── reports/             # Generated reports, including reports/findings.json
 ├── credentials/         # Harvested usernames/passwords/hashes
-└── logs/                # Error and hook logs, e.g. logs/scope-enforcement.log
+└── logs/                # Error and hook logs (e.g. logs/scope-enforcement.log)
+                         #   and logs/attempts.jsonl - every attack attempt's
+                         #   outcome (state-persistence.sh record), the raw
+                         #   data attempt-aggregator.sh reads for
+                         #   skills/htb-decision-tree's calibrated rates
 ```
 
 ## Usage Instructions
@@ -132,7 +145,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh sto
 # Check if a technique already failed (for a previous agent or a previous
 # turn) before repeating it - there's no general "already checked" flag,
 # but check-failed covers the common case of not repeating known failures
-if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "ftp" "anonymous_login"; then
+if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "$SESSION_ID" "ftp" "anonymous_login"; then
     echo "Proceeding - no prior failed attempt recorded for this technique"
 else
     echo "FTP anonymous login already failed in this session - skip or try a different technique"
@@ -141,7 +154,7 @@ fi
 # After actually attempting something, record the outcome so later agents
 # benefit from this check
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
-  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false
+  "$SESSION_ID" "ftp" "anonymous_login" "no credentials found" false --agent "exploit-agent" --port 21
 ```
 
 ## Error Handling

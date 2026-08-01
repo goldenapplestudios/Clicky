@@ -6,38 +6,29 @@ estimate which difficulty tier the target most resembles.
 Usage: pattern-matcher.py --profile '{"services_json}"' --difficulty "medium"
 
 The profile JSON accepts service names as boolean flags, and known finding
-flags (see PATTERN_FLAGS below) if you already know some results, e.g.:
+flags (see the patterns loaded from data/pattern-frequencies.json) if you
+already know some results, e.g.:
   '{"ftp": true, "http": true, "ftp_anonymous": true, "sqli_found": false}'
 Services alone (without finding flags) are fine too - unset finding flags
 are just treated as "unknown", not "false".
+
+Frequencies are qualitative ("common"/"occasional"/"rare"), not measured
+percentages, and deliberately don't graduate to measured data the way
+skills/htb-decision-tree's service-priority matrix does (see
+priority_data.py): Clicky never records a target's actual difficulty tier
+anywhere, so there's no ground truth to calibrate this axis against.
 """
 import argparse
 import json
+import pathlib
 
-# Mirrors "HTB Pattern Recognition" in SKILL.md - keep these in sync if the
-# lists there change. Each pattern's flag is what --profile should set to
-# confirm/deny it; if the flag is absent from the profile, the pattern is
-# reported as an untested candidate rather than matched or ruled out.
-PATTERNS = {
-    "easy": [
-        ("Anonymous FTP with credentials", "ftp_anonymous", 0.73),
-        ("SMB null sessions with user lists", "smb_null", 0.61),
-        ("Default CMS credentials", "default_creds", 0.58),
-        ("SQL injection in login forms", "sqli_found", 0.42),
-    ],
-    "medium": [
-        ("Credential reuse across services", "cred_reuse", 0.67),
-        ("Web application vulnerabilities leading to RCE", "web_rce", 0.54),
-        ("Service version exploits", "version_exploit", 0.49),
-        ("Configuration file exposure", "config_exposure", 0.45),
-    ],
-    "hard": [
-        ("Chained exploits required", "chained_exploit", 0.89),
-        ("Custom exploitation needed", "custom_exploit", 0.76),
-        ("Binary exploitation", "binary_exploit", 0.64),
-        ("Advanced pivoting", "advanced_pivot", 0.58),
-    ],
-}
+PATTERN_DATA_PATH = pathlib.Path(__file__).resolve().parent / ".." / "data" / "pattern-frequencies.json"
+
+
+def load_patterns():
+    with open(PATTERN_DATA_PATH) as f:
+        data = json.load(f)
+    return data["patterns"]
 
 
 def main():
@@ -53,27 +44,29 @@ def main():
         print(f"ERROR: --profile is not valid JSON: {e}")
         return
 
+    patterns = load_patterns()
     tiers = [args.difficulty] if args.difficulty else ["easy", "medium", "hard"]
 
     for tier in tiers:
         confirmed = []
         candidates = []
-        for name, flag, base_rate in PATTERNS[tier]:
+        for pattern in patterns[tier]:
+            name, flag, frequency = pattern["name"], pattern["flag"], pattern["frequency"]
             if flag in profile:
                 if profile[flag]:
-                    confirmed.append((name, base_rate))
+                    confirmed.append((name, frequency))
             else:
-                candidates.append((name, base_rate))
+                candidates.append((name, frequency))
 
         print(f"=== {tier.upper()} box patterns ===")
         if confirmed:
             print("Confirmed:")
-            for name, rate in confirmed:
-                print(f"  - {name} (baseline {rate:.0%} of {tier} boxes)")
+            for name, frequency in confirmed:
+                print(f"  - {name} ({frequency} on {tier} boxes)")
         if candidates:
             print("Untested candidates (worth checking):")
-            for name, rate in candidates:
-                print(f"  - {name} (baseline {rate:.0%} of {tier} boxes)")
+            for name, frequency in candidates:
+                print(f"  - {name} ({frequency} on {tier} boxes)")
         if not confirmed and not candidates:
             print("  (no patterns applicable given the profile)")
         print()
@@ -81,7 +74,7 @@ def main():
     if not args.difficulty:
         scores = {}
         for tier in ["easy", "medium", "hard"]:
-            confirmed_count = sum(1 for _, flag, _ in PATTERNS[tier] if profile.get(flag) is True)
+            confirmed_count = sum(1 for p in patterns[tier] if profile.get(p["flag"]) is True)
             scores[tier] = confirmed_count
         best = max(scores, key=scores.get)
         if scores[best] > 0:

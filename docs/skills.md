@@ -178,7 +178,7 @@ API attack techniques.
 
 ### ai-llm-security-testing
 
-AI/LLM application security testing: prompt injection and jailbreak probes via canary-token detection (a freshly generated unique token is substituted into a payload; a hard pass/fail is whether that exact token shows up in the response), system-prompt-extraction probes (no automated verdict - response is captured for manual review), and an OWASP LLM Top 10 checklist for categories that don't reduce to a scriptable black-box probe (training data poisoning, model theft, supply chain, excessive agency, overreliance). Findings use a deliberate `owasp_llm` field instead of `mitre_attack` - ATT&CK IDs don't map cleanly to this domain either. See `skills/ai-llm-security-testing/SKILL.md`.
+AI/LLM application security testing: prompt injection and jailbreak probes via canary-token detection (a freshly generated unique token is substituted into a payload; a hard pass/fail is whether that exact token shows up in the response), system-prompt-extraction probes (no automated verdict - response is captured for manual review), an OWASP Top 10 for LLM Applications (2025) checklist for categories that don't reduce to a scriptable black-box probe (sensitive info disclosure, supply chain, data/model poisoning, improper output handling, excessive agency, vector/embedding weaknesses, misinformation, unbounded consumption), and - for classical/non-LLM ML models (exposed model-serving endpoints, raw model artifacts) rather than chat-style apps - a separate OWASP Machine Learning Security Top 10 (2023) checklist. Findings use a deliberate `owasp_llm` field instead of `mitre_attack` - ATT&CK IDs don't map cleanly to this domain either. Probed endpoints also export as a partial AIBOM (CycloneDX 1.5, via `report-generation`'s `interop-formats.sh aibom-partial`). See `skills/ai-llm-security-testing/SKILL.md`.
 
 ### credential-harvesting
 
@@ -402,9 +402,9 @@ access_level: none|user|root
 
 ### htb-decision-tree
 
-Attack logic derived from pentesting research.
+Attack logic, self-calibrated from this operator's own accumulated session history (real measured success rates once enough data exists, honest heuristic ordering otherwise - see `skills/htb-decision-tree/SKILL.md`).
 
-**Service Priorities**:
+**Service Priorities** (illustrative order - see `service-prioritizer.py --show-matrix` for live data):
 
 ```text
 FTP (anon) -> SMB (null) -> HTTP -> SSH -> Other
@@ -413,9 +413,9 @@ FTP (anon) -> SMB (null) -> HTTP -> SSH -> Other
 **Attack Chains**:
 
 ```text
-Chain A: Anonymous -> Creds -> Reuse (85%)
-Chain B: Web Vuln -> Shell -> Privesc (75%)
-Chain C: Default Creds -> Direct (100% when vuln)
+Chain A: Anonymous -> Creds -> Reuse
+Chain B: Web Vuln -> Shell -> Privesc
+Chain C: Default Creds -> Direct
 ```
 
 ### tool-management
@@ -448,7 +448,8 @@ Output and documentation.
 **Interop Export Formats** (`interop-formats.sh`, separate from the narrative report above - for CI/tooling consumers):
 - SARIF 2.1.0 (from source-code-analysis's source findings)
 - CycloneDX 1.5 `sbom-partial` (from dependency findings - named "partial" deliberately, since it's vulnerability-derived, not a full inventory)
-- Both validated during development against the real published JSON Schemas
+- CycloneDX 1.5 `aibom-partial` (from ai-llm-security-testing's probe output - named "partial" for the same reason: black-box probing, no model architecture/weights/provenance, one `machine-learning-model` component per probed endpoint with OWASP LLM Top 10 (2025) coverage attached)
+- All three validated against the real published JSON Schemas by an actual re-runnable test (`tests/schema_validation/test_schema_validation.py`, run via `tests/run_all.sh`), not just asserted in prose
 
 ---
 

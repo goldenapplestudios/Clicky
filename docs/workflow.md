@@ -261,15 +261,15 @@ flowchart TD
     PARSE --> CLASSIFY["Classify Each Service"]
 
     CLASSIFY --> FTP_CHECK{"FTP with<br/>anonymous?"}
-    FTP_CHECK -->|Yes| FTP_P1["Priority 1<br/>100% success rate"]
+    FTP_CHECK -->|Yes| FTP_P1["Priority 1<br/>(calibrated rate)"]
     FTP_CHECK -->|No| SMB_CHECK
 
     CLASSIFY --> SMB_CHECK{"SMB with<br/>null session?"}
-    SMB_CHECK -->|Yes| SMB_P1["Priority 1<br/>75% success rate"]
+    SMB_CHECK -->|Yes| SMB_P1["Priority 1<br/>(calibrated rate)"]
     SMB_CHECK -->|No| HTTP_CHECK
 
     CLASSIFY --> HTTP_CHECK{"HTTP with<br/>CMS/webapp?"}
-    HTTP_CHECK -->|Yes| HTTP_P2["Priority 2<br/>85% success rate"]
+    HTTP_CHECK -->|Yes| HTTP_P2["Priority 2<br/>(calibrated rate)"]
     HTTP_CHECK -->|No| OTHER_CHECK
 
     CLASSIFY --> OTHER_CHECK{"Other services?<br/>SSH, MySQL, etc."}
@@ -285,23 +285,22 @@ flowchart TD
 
 ### How Priorities Are Assigned
 
-The Decision Agent uses a **weighted scoring system** based on pentesting research:
+Conceptually, the Decision Agent weighs a **success rate** (real, self-calibrated per-service/technique data from `skills/htb-decision-tree` - see that skill's SKILL.md, not a fixed research citation), **ease of exploit**, and **value if successful**:
 
 ```text
 Score = (Success_Rate * 0.4) + (Ease_of_Exploit * 0.3) + (Value_if_Successful * 0.3)
 
 Example: FTP with anonymous access
-- Success_Rate: 100% (1.0) * 0.4 = 0.40
+- Success_Rate: <from service-prioritizer.py --show-matrix> * 0.4
 - Ease_of_Exploit: Very easy (0.9) * 0.3 = 0.27
 - Value: Often contains credentials (0.8) * 0.3 = 0.24
-- Total: 0.91 = Priority 1
 
 Example: HTTP with WordPress
-- Success_Rate: 85% (0.85) * 0.4 = 0.34
+- Success_Rate: <from service-prioritizer.py --show-matrix> * 0.4
 - Ease_of_Exploit: Moderate (0.6) * 0.3 = 0.18
 - Value: Direct shell possible (0.9) * 0.3 = 0.27
-- Total: 0.79 = Priority 2
 ```
+This is an illustrative model of the reasoning, not a literal formula `success-calculator.sh` implements (it combines per-service rates via `1 - ∏(1 - p)` for "at least one path succeeds," not this weighted sum) - see that script for the actual mechanical calculation.
 
 ### Attack Chain Construction
 
@@ -615,9 +614,9 @@ flowchart TD
 
 ### Linux Enumeration Checklist
 
-The Privesc Agent checks these in order of likelihood:
+The Privesc Agent checks these in order of likelihood - a heuristic ordering, not a measured claim (an earlier version of this doc asserted specific percentages with no backing dataset; real per-technique rates, once enough attempts accumulate, come from `attempt-aggregator.sh compute`'s `by_technique` output - see `skills/htb-decision-tree/SKILL.md`):
 
-**1. Sudo Permissions** (25% of vulnerable systems)
+**1. Sudo Permissions** (`privesc-agent:sudo_misconfiguration`)
 
 ```bash
 $ sudo -l
@@ -641,7 +640,7 @@ sudo less /etc/passwd
 !/bin/bash
 ```
 
-**2. SUID Binaries** (30% of vulnerable systems)
+**2. SUID Binaries** (`privesc-agent:suid_binary`)
 
 ```bash
 $ find / -perm -4000 -type f 2>/dev/null
@@ -677,7 +676,7 @@ su hacker
 # Replace root's hash
 ```
 
-**4. Cron Jobs** (10% of vulnerable systems)
+**4. Cron Jobs** (`privesc-agent:cron_hijack`)
 
 ```bash
 # Check system cron
@@ -692,7 +691,7 @@ ls -la /etc/cron.d/
 
 ### Windows Enumeration Checklist
 
-**1. Token Privileges** (30% of Windows boxes)
+**1. Token Privileges** (`privesc-agent:token_impersonation`)
 
 ```powershell
 whoami /priv
@@ -705,7 +704,7 @@ SeRestorePrivilege        # Write any file
 SeDebugPrivilege          # Debug processes
 ```
 
-**2. Service Misconfigurations** (25% of Windows boxes)
+**2. Service Misconfigurations** (`privesc-agent:service_misconfiguration`)
 
 ```powershell
 # Unquoted service paths
@@ -716,7 +715,7 @@ accesschk.exe -uwcqv "Everyone" *
 accesschk.exe -uwcqv "Users" *
 ```
 
-**3. Scheduled Tasks** (15% of Windows boxes)
+**3. Scheduled Tasks** (`privesc-agent:scheduled_task_hijack`)
 
 ```powershell
 schtasks /query /fo LIST /v

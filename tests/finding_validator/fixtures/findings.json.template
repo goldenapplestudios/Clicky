@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "id": "finding-no-evidence",
+      "severity": "LOW",
+      "description": "A finding with no evidence.command at all",
+      "source_agent": "exploit-agent",
+      "confidence": "unconfirmed",
+      "evidence": {}
+    },
+    {
+      "id": "finding-clean-pass",
+      "severity": "CRITICAL",
+      "description": "SQL injection confirmed via sqlmap",
+      "source_agent": "exploit-agent",
+      "confidence": "confirmed",
+      "evidence": {"command": "sqlmap -u http://__SESSION_TARGET__/login.php?id=1 --dump"}
+    },
+    {
+      "id": "finding-errored-fail",
+      "severity": "HIGH",
+      "description": "Claimed anonymous FTP access, but the command actually errored",
+      "source_agent": "loot-agent",
+      "confidence": "confirmed",
+      "evidence": {"command": "ftp -n __SESSION_TARGET__ anonymous-login-script"}
+    }
+  ]
+}

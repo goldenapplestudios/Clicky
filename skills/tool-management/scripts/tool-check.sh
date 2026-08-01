@@ -134,6 +134,13 @@ suggest_install() {
     esac
 }
 
+# Environment detection runs first - it sets $OS/$DISTRO/$PKG_MGR, which
+# the tool-inventory generation below reads. It used to run at the very
+# end of this script instead, meaning the inventory's "environment" block
+# was always written with those three fields empty (verified) - a plain
+# ordering bug, not a logic error in detect_environment() itself.
+detect_environment
+
 # Main checks
 echo -e "\n${BLUE}[*] Checking Essential Tools...${NC}"
 echo "═══════════════════════════════════════════════════════════════"
@@ -216,44 +223,35 @@ echo -e "\n${BLUE}[*] Generating tool inventory...${NC}"
 INVENTORY_FILE="$HOME/.claude/cache/tool_inventory.json"
 mkdir -p "$(dirname "$INVENTORY_FILE")"
 
-cat > "$INVENTORY_FILE" << EOF
-{
-  "timestamp": $(date +%s),
-  "environment": {
-    "os": "$OS",
-    "distro": "$DISTRO",
-    "package_manager": "$PKG_MGR",
-    "nix_available": $(command -v nix &> /dev/null && echo "true" || echo "false"),
-    "docker_available": $(command -v docker &> /dev/null && echo "true" || echo "false")
-  },
-  "tools": {
-EOF
+if command -v jq &> /dev/null; then
+    # Built via jq -n/--arg throughout, not string-concatenated by hand -
+    # the previous version spliced `$(which $tool)`'s raw output directly
+    # into a hand-written JSON string with no escaping at all, so any tool
+    # path containing a double quote or backslash would have produced a
+    # corrupt tool_inventory.json (silently, since nothing here validated
+    # the result).
+    tools_json="{}"
+    for tool in nmap masscan gobuster feroxbuster dirb sqlmap hydra john hashcat smbclient enum4linux nc socat; do
+        if command -v "$tool" &> /dev/null; then
+            tools_json=$(jq --arg t "$tool" --arg p "$(command -v "$tool")" \
+                '.[$t] = {"available": true, "path": $p}' <<< "$tools_json")
+        else
+            tools_json=$(jq --arg t "$tool" '.[$t] = {"available": false, "path": null}' <<< "$tools_json")
+        fi
+    done
 
-# Add tool status to JSON
-first=true
-for tool in nmap masscan gobuster feroxbuster dirb sqlmap hydra john hashcat smbclient enum4linux nc socat; do
-    if [ "$first" = false ]; then
-        echo "," >> "$INVENTORY_FILE"
-    fi
-    first=false
+    jq -n --argjson ts "$(date +%s)" --arg os "$OS" --arg distro "$DISTRO" --arg pkgmgr "$PKG_MGR" \
+        --argjson nix "$(command -v nix &> /dev/null && echo true || echo false)" \
+        --argjson docker "$(command -v docker &> /dev/null && echo true || echo false)" \
+        --argjson tools "$tools_json" \
+        '{timestamp: $ts, environment: {os: $os, distro: $distro, package_manager: $pkgmgr,
+          nix_available: $nix, docker_available: $docker}, tools: $tools}' \
+        > "$INVENTORY_FILE"
 
-    if command -v $tool &> /dev/null; then
-        echo -n "    \"$tool\": { \"available\": true, \"path\": \"$(which $tool)\" }" >> "$INVENTORY_FILE"
-    else
-        echo -n "    \"$tool\": { \"available\": false, \"path\": null }" >> "$INVENTORY_FILE"
-    fi
-done
-
-cat >> "$INVENTORY_FILE" << EOF
-
-  }
-}
-EOF
-
-echo "  Tool inventory saved to: $INVENTORY_FILE"
-
-# Run environment detection
-detect_environment
+    echo "  Tool inventory saved to: $INVENTORY_FILE"
+else
+    echo "  jq not found - skipping tool_inventory.json generation (the on-screen check above still ran)"
+fi
 
 echo -e "\n${GREEN}[✓] Tool check complete!${NC}"
 echo "═══════════════════════════════════════════════════════════════"

@@ -1,8 +1,10 @@
 #!/bin/bash
 #
-# Success Calculator - combine per-service success rates (from the HTB
-# Priority Matrix in this skill's SKILL.md) into an overall probability
-# that at least one attack path succeeds.
+# Success Calculator - combine per-service data from Clicky's self-
+# calibrated priority_data.py (real measured rates from this operator's
+# session history where enough exist, honest heuristic weight otherwise -
+# see that module and skills/htb-decision-tree/SKILL.md) into an overall
+# probability that at least one attack path succeeds.
 #
 # Usage:
 #   success-calculator.sh analyze "{service_list}"
@@ -13,8 +15,14 @@
 # failed - these are excluded from the combined probability, since a known
 # failure shouldn't inflate "chance something works."
 #
+# Output includes overall_basis ("measured"/"mixed"/"heuristic") so a
+# caller can never present the combined number without knowing how much of
+# it came from real data vs. the heuristic fallback.
+#
 
 set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="" SERVICES="" ATTEMPTS=""
 
@@ -40,35 +48,23 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 - "$SERVICES" "$ATTEMPTS" << 'PYEOF'
+python3 - "$SERVICES" "$ATTEMPTS" "$SCRIPT_DIR" << 'PYEOF'
 import json
 import sys
 
-services_arg, attempts_arg = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else ""
+services_arg, attempts_arg, script_dir = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "", sys.argv[3]
+sys.path.insert(0, script_dir)
+import priority_data  # noqa: E402
 
-# Mirrors the HTB Service Priority Matrix in SKILL.md and
-# service-prioritizer.py's PRIORITY_MATRIX - keep all three in sync.
-PORT_RATES = {
-    21: ("ftp", 0.73),          # matches "Anonymous FTP with credentials" easy-box baseline
-    445: ("smb_null", 0.61),
-    139: ("smb_null", 0.61),
-    80: ("web_sqli", 0.42),
-    443: ("web_sqli", 0.42),
-    22: ("ssh", 0.45),
-    3306: ("mysql", 0.41),
-    6379: ("redis", 0.95),
-    2375: ("docker", 0.90),
-    2376: ("docker", 0.90),
-    27017: ("mongodb", 0.85),
-    9200: ("elasticsearch", 0.82),
-    3389: ("rdp", 0.35),
-}
+merged, threshold = priority_data.load_merged_services()
+port_to_service = priority_data.port_to_service_map(merged)
 
 attempted_ports = {int(p.strip()) for p in attempts_arg.split(",") if p.strip().isdigit()}
 
 result = {}
 probabilities = []
-seen_keys = set()
+bases = []
+seen_services = set()
 for raw in services_arg.split(","):
     raw = raw.strip()
     if not raw.isdigit():
@@ -76,22 +72,30 @@ for raw in services_arg.split(","):
     port = int(raw)
     if port in attempted_ports:
         continue
-    entry = PORT_RATES.get(port)
-    if entry:
-        key, rate = entry
-        if key not in seen_keys:
-            result[key] = rate
-            probabilities.append(rate)
-            seen_keys.add(key)
+    svc = port_to_service.get(port)
+    if svc and svc not in seen_services:
+        entry = merged[svc]
+        result[svc] = {"value": entry["value"], "basis": entry["basis"], "samples": entry["samples"]}
+        probabilities.append(entry["value"])
+        bases.append(entry["basis"])
+        seen_services.add(svc)
 
 if probabilities:
     overall = 1.0
     for p in probabilities:
         overall *= (1 - p)
     overall = round(1 - overall, 2)
+    if all(b == "measured" for b in bases):
+        overall_basis = "measured"
+    elif any(b == "measured" for b in bases):
+        overall_basis = "mixed"
+    else:
+        overall_basis = "heuristic"
 else:
     overall = 0.0
+    overall_basis = "heuristic"
 
 result["overall_success"] = overall
+result["overall_basis"] = overall_basis
 print(json.dumps(result, indent=2))
 PYEOF

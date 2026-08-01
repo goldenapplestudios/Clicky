@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-25T09:01:00Z","session_id":"session_b","agent":"exploit-agent","service":"ftp","port":21,"technique":"anonymous_login","success":true,"notes":"x"}
+{"timestamp":"2026-07-25T09:02:00Z","session_id":"session_b","agent":"exploit-agent","service":"ftp","port":21,"technique":"anonymous_login","success":true,"notes":"x"}
+{"timestamp":"2026-07-25T09:03:00Z","session_id":"session_b","agent":"exploit-agent","service":"ftp","port":21,"technique":"anonymous_login","success":false,"notes":"x"}
+{"timestamp":"2026-07-25T09:04:00Z","session_id":"session_b","agent":"exploit-agent","service":"smb","port":445,"technique":"null_session","success":true,"notes":"x"}

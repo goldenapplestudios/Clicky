@@ -326,12 +326,20 @@ Each `high_value_findings` entry worth reporting as a finding should have a corr
 
 ## Communication Protocol
 
-Immediately after extracting or confirming something high-value (not batched at the end), log it:
+Immediately after **every** access attempt (anonymous FTP login, SMB null session, etc.) - success or failure, not batched at the end - log the outcome:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "<service, e.g. ftp|smb>" "<technique, e.g. anonymous_login|null_session>" \
+  "<one-line outcome>" <true|false> --agent "loot-agent" [--port <port>] [--severity "<SEV>" --finding-id "<id, if also logged below>"]
+```
+`commands/pentest.md` Step 4 routes FTP anonymous-access and SMB null-session testing through loot-agent (not exploit-agent) - without this, those two attempt types would never contribute real data to `skills/htb-decision-tree`'s calibrated success rates. Log the failure case too (access denied) as much as the success case.
+
+Immediately after extracting or confirming something high-value, additionally log it as a finding:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "$SESSION_ID" "<SEVERITY>" "<description>" \
   --evidence-command "<the exact command that extracted/confirmed it>" --confidence "<confirmed|likely|unconfirmed>" --source-agent "loot-agent"
 ```
-This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
+This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report. Pass the finding's `id` as `--finding-id` on the `state-persistence.sh record` call above so the two records cross-reference.
 
 1. **Receive access notification** from PrivEsc Agent
 2. **Begin systematic extraction** based on access level
@@ -341,8 +349,8 @@ This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cr
 
 ## Performance Metrics
 
-- Extraction speed: < 5 minutes for standard target
-- Data completeness: 90% of valuable data extracted
+- Extraction speed: check `attempt-aggregator.sh compute`'s `timing_by_agent.loot-agent.median_seconds_to_first_success` for this operator's real observed median - not a fixed target
+- Data completeness: not measured, and not measurable even in principle by this framework - there's no ground truth anywhere in Clicky for "how much valuable data existed to find" on a given target to compare extraction against
 - Organization: Structured for easy analysis
 - Stealth: Minimize disk/network footprint
 

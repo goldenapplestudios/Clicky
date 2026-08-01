@@ -1,30 +1,25 @@
 ---
 name: htb-decision-tree
-description: Strategic attack prioritization based on Hack The Box patterns and success rates from extensive machine analysis
+description: Strategic attack prioritization, self-calibrated from this operator's own accumulated session history (real measured success rates once enough data exists), with an honestly-labeled heuristic fallback until then
 allowed-tools: Bash, Read, Grep
 ---
 
 # HTB Decision Tree Skill
 
 ## Purpose
-Provides data-driven attack prioritization based on patterns observed across hundreds of HTB machines, with success probability calculations and strategic recommendations.
+Provides data-driven attack prioritization: real per-service/technique success rates computed from Clicky's own session history (`skills/session-management/scripts/attempt-aggregator.sh`, fed by every exploit-agent/privesc-agent/loot-agent attempt via `state-persistence.sh`), falling back to a clearly-labeled heuristic ordering until a service has enough recorded attempts to trust a measured number. No external dataset is claimed - the previous version of this skill asserted specific percentages "based on analysis of hundreds of HTB machines," which turned out to have no backing dataset anywhere in the repo and disagreed with itself across the three files that restated it. This mechanism replaces that with numbers that are either real (computed from attempts this framework actually logged) or explicitly marked as not-yet-measured - never fabricated precision presented as research.
 
 ## HTB Service Priority Matrix
 
-Based on analysis of HTB machines, services should be tested in this priority order:
+The live source of truth is `service-prioritizer.py --show-matrix` (see Scripts Usage below), not a static table - it prints each service's current basis (`measured: NN% success over N attempts`, or `heuristic priority, no measured data yet`) pulled from `priority_data.py`, which merges `data/baseline-priority-order.json`'s heuristic ordering with `attempt-aggregator.sh`'s real computed rates.
 
-| Priority | Service | Port | Success Rate | Common Vulnerabilities |
-|----------|---------|------|--------------|------------------------|
-| 1 | FTP | 21 | 100% | Anonymous access, credential files |
-| 2 | SMB | 445/139 | 75% | Null sessions, user enumeration |
-| 3 | HTTP/HTTPS | 80/443 | 68% | Web vulnerabilities, default creds |
-| 4 | SSH | 22 | 45% | Credential reuse, weak passwords |
-| 5 | MySQL | 3306 | 41% | Default/blank root, UDF exploitation |
-| 6 | Redis | 6379 | 95% | Unauthenticated access |
-| 7 | Docker | 2375/2376 | 90% | API exposure, container escape |
-| 8 | MongoDB | 27017 | 85% | No authentication |
-| 9 | Elasticsearch | 9200 | 82% | No authentication, data exposure |
-| 10 | RDP | 3389 | 35% | BlueKeep, credential attacks |
+For orientation only - **illustrative example, not live data** (actual values depend entirely on your own session history and will differ):
+
+| Service | Port | Example status | Common Vulnerabilities |
+|---------|------|-----------------|------------------------|
+| FTP | 21 | heuristic (no data yet) → measured: 82% over 11 attempts | Anonymous access, credential files |
+| SMB | 445/139 | heuristic (no data yet) | Null sessions, user enumeration |
+| HTTP/HTTPS | 80/443 | heuristic (no data yet) | Web vulnerabilities, default creds |
 
 ## Attack Decision Trees
 
@@ -88,36 +83,40 @@ ${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/success-calculator.sh ana
 # Excluding services already attempted and failed:
 ${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/success-calculator.sh --services "{service_list}" --attempts "{tried_ports}"
 
-# Example output:
+# Example output - "value"/"basis"/"samples" per service, plus
+# overall_basis so you know whether overall_success came from real data,
+# a heuristic guess, or a mix:
 # {
-#   "ftp": 0.73,
-#   "smb_null": 0.61,
-#   "web_sqli": 0.42,
-#   "overall_success": 0.94
+#   "ftp": {"value": 0.82, "basis": "measured", "samples": 11},
+#   "smb": {"value": 0.6, "basis": "heuristic", "samples": 0},
+#   "overall_success": 0.93,
+#   "overall_basis": "mixed"
 # }
 ```
 
-This is a mechanical combination of the Priority Matrix's per-service base rates — treat it as a starting estimate, not a substitute for judgment. Adjust it with anything learned in memory (per decision-agent's Memory Usage Policy) before relying on it.
+This is a mechanical combination of `priority_data.py`'s per-service values (measured where enough data exists, heuristic otherwise) — treat it as a starting estimate, not a substitute for judgment, and check `overall_basis` before presenting the number as anything more than a heuristic guess. Adjust it with anything learned in memory (per decision-agent's Memory Usage Policy) before relying on it.
 
 ## HTB Pattern Recognition
 
+Unlike the service-priority matrix above, this axis is **permanently heuristic** - Clicky never records a target's actual difficulty tier anywhere, so there's no ground truth to calibrate against, only qualitative frequency labels (`data/pattern-frequencies.json`, via `pattern-matcher.py`):
+
 ### Easy Box Patterns
-- Anonymous FTP with credentials (73% of easy boxes)
-- SMB null sessions with user lists (61%)
-- Default CMS credentials (58%)
-- SQL injection in login forms (42%)
+- Anonymous FTP with credentials (common)
+- SMB null sessions with user lists (common)
+- Default CMS credentials (common)
+- SQL injection in login forms (occasional)
 
 ### Medium Box Patterns
-- Credential reuse across services (67%)
-- Web application vulnerabilities leading to RCE (54%)
-- Service version exploits (49%)
-- Configuration file exposure (45%)
+- Credential reuse across services (occasional)
+- Web application vulnerabilities leading to RCE (occasional)
+- Service version exploits (occasional)
+- Configuration file exposure (occasional)
 
 ### Hard Box Patterns
-- Chained exploits required (89%)
-- Custom exploitation needed (76%)
-- Binary exploitation (64%)
-- Advanced pivoting (58%)
+- Chained exploits required (common)
+- Custom exploitation needed (common)
+- Binary exploitation (occasional)
+- Advanced pivoting (occasional)
 
 ## Strategic Recommendations
 
@@ -186,6 +185,11 @@ if "MongoDB" in services or "Redis" in services:
 ```bash
 # Analyze services and return priority order
 ${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/service-prioritizer.py --services "21,22,80,445" --target {ip}
+
+# Show the full live priority matrix (all known services, not just
+# discovered ports) - this is the actual current data behind the
+# "illustrative example" table above
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/service-prioritizer.py --show-matrix
 ```
 
 ### Pattern Matcher
@@ -211,7 +215,7 @@ When analyzing scan results:
 4. Use `pattern-matcher.py` to identify which HTB difficulty pattern the target resembles as findings come in
 5. Adjust strategy based on failure recovery patterns
 
-All three scripts are mechanical helpers over the tables in this skill — the decision-agent should still apply judgment (and anything learned in memory, per its Memory Usage Policy) rather than following their output blindly.
+All three scripts are mechanical helpers over `priority_data.py`'s self-calibrated data (or, for pattern-matcher.py, the permanently-heuristic `data/pattern-frequencies.json`) — the decision-agent should still apply judgment (and anything learned in memory, per its Memory Usage Policy) rather than following their output blindly.
 
 ## Performance Metrics
 
@@ -223,7 +227,7 @@ Track these metrics to improve decision making:
 
 ## Notes
 
-- Probabilities are based on HTB machine analysis, real environments may differ
+- Service-priority values are self-calibrated from this operator's own session history (see `priority_data.py`), not an external dataset - they'll be pure heuristic on a fresh install and grow more accurate (and more specific to the kinds of targets you actually test) as `logs/attempts.jsonl` accumulates across engagements
+- Pattern-matcher frequencies stay permanently qualitative (see above) - real environments may differ regardless
 - Always prioritize services with exposed sensitive data
 - Consider the machine difficulty rating when calculating probabilities
-- Update patterns based on new HTB releases and walkthroughs

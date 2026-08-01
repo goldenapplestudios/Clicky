@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Qualitative frequency labels for skills/htb-decision-tree/scripts/pattern-matcher.py's Easy/Medium/Hard box patterns. Deliberately NOT calibrated against session history like baseline-priority-order.json: Clicky never records a target's actual difficulty tier anywhere, so there is no ground truth to measure this axis against - this stays permanently heuristic, not a cold-start fallback for something that later becomes measured.",
+  "patterns": {
+    "easy": [
+      {"name": "Anonymous FTP with credentials", "flag": "ftp_anonymous", "frequency": "common"},
+      {"name": "SMB null sessions with user lists", "flag": "smb_null", "frequency": "common"},
+      {"name": "Default CMS credentials", "flag": "default_creds", "frequency": "common"},
+      {"name": "SQL injection in login forms", "flag": "sqli_found", "frequency": "occasional"}
+    ],
+    "medium": [
+      {"name": "Credential reuse across services", "flag": "cred_reuse", "frequency": "occasional"},
+      {"name": "Web application vulnerabilities leading to RCE", "flag": "web_rce", "frequency": "occasional"},
+      {"name": "Service version exploits", "flag": "version_exploit", "frequency": "occasional"},
+      {"name": "Configuration file exposure", "flag": "config_exposure", "frequency": "occasional"}
+    ],
+    "hard": [
+      {"name": "Chained exploits required", "flag": "chained_exploit", "frequency": "common"},
+      {"name": "Custom exploitation needed", "flag": "custom_exploit", "frequency": "common"},
+      {"name": "Binary exploitation", "flag": "binary_exploit", "frequency": "occasional"},
+      {"name": "Advanced pivoting", "flag": "advanced_pivot", "frequency": "occasional"}
+    ]
+  }
+}

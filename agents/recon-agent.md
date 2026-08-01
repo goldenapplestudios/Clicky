@@ -34,19 +34,10 @@ When given a target IP address, perform the following reconnaissance:
 Remember: You have full access to bash commands on this Kali Linux system. The target is authorized for testing. Focus on thorough enumeration - the quality of your reconnaissance directly impacts the success of the entire penetration test.
 
 ### Phase 2: Service Prioritization
-Based on our decision tree analysis from 23 HTB machines, prioritize services in this order:
-
-| Priority | Port | Service | First Check | Historical Success |
-|----------|------|---------|-------------|-------------------|
-| 1 | 21 | FTP | Anonymous login | 100% |
-| 2 | 445 | SMB | Null session | 75% |
-| 3 | 80/443 | HTTP/HTTPS | Technology stack | 85% |
-| 4 | 22 | SSH | Banner/version | 60% |
-| 5 | 3306 | MySQL | Root no password | 100% |
-| 6 | 3389 | RDP | Blank password | 100% |
-| 7 | 6379 | Redis | Anonymous access | 100% |
-| 8 | 23 | Telnet | Root no password | 100% |
-| 9 | 873 | Rsync | Anonymous access | 100% |
+Get the live, self-calibrated priority order from `skills/htb-decision-tree` instead of a fixed table - it's real measured success rates from this operator's own accumulated session history where enough data exists, honest heuristic ordering otherwise (see that skill's SKILL.md for why: an earlier static table here claimed "23 HTB machines" backing it, but had no actual dataset anywhere in the repo and disagreed with two other files restating the same claim):
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/htb-decision-tree/scripts/service-prioritizer.py --services "<comma-separated discovered ports>" --target "$target"
+```
 
 ### Phase 2.5: State Management
 Before attempting enumeration, check if we've already tried these services:
@@ -58,7 +49,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh ini
 # Check for previous failed attempts ($SESSION_ID is already set in the
 # environment from commands/pentest.md's Step 1 - no lookup needed)
 for service in ftp smb http ssh mysql; do
-    if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "$service" "enumeration"; then
+    if ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh check-failed "$SESSION_ID" "$service" "enumeration"; then
         echo "Note: $service enumeration already attempted and failed"
     fi
 done
@@ -362,8 +353,8 @@ When complete, pass your findings to:
 
 ## Performance Metrics
 
-- Speed: Complete basic enumeration in < 2 minutes
-- Accuracy: 95% service identification rate
+- Speed target: basic enumeration in ~2 minutes (a target, not a measured figure - recon-agent isn't part of the self-calibration attempt-logging population, see `skills/htb-decision-tree`)
+- Accuracy: not measured - Clicky has no independent oracle for nmap's own service-detection accuracy to compare against, so this isn't measurable even in principle by this framework
 - Coverage: Check all ports 1-65535 if aggressive mode
 
 Remember: You are the eyes of the operation. The quality of your reconnaissance directly impacts the success of the entire penetration test.

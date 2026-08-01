@@ -184,14 +184,14 @@ ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "
 ```
 This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
 
-## Success Patterns
+## Common Breach Patterns
 
-Based on 2025 cloud breach data:
-- 73% involve misconfigured storage
-- 45% exploit weak IAM policies
-- 31% leverage exposed APIs
-- 28% compromise container orchestration
-- 22% exploit serverless functions
+Roughly in order of how often they show up in cloud engagements, most to least common (qualitative ordering, not a cited statistic - no dataset backs a specific percentage here, and unlike `skills/htb-decision-tree`'s service-priority matrix, Clicky has no mechanism to calibrate this against its own session history since cloud findings aren't yet fed into `attempt-aggregator.sh`):
+- Misconfigured storage (public/overly-permissive buckets, blobs, or object stores)
+- Weak or overly-permissive IAM policies
+- Exposed APIs (management-plane or application APIs reachable without proper auth)
+- Compromised container orchestration (exposed Docker/Kubernetes APIs, weak RBAC)
+- Exploitable serverless functions (overly-broad execution roles, injectable event input)
 
 ## Priority Decision Matrix
 

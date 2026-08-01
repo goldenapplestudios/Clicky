@@ -4,7 +4,7 @@
 
 ---
 
-When a run fails partway through, or you just want to know whether Clicky's actual success rates match the HTB baseline it was built from, you need a record of what was actually attempted. There are two tiers, and they're complementary rather than alternatives.
+When a run fails partway through, or you just want to see how Clicky's actual observed success rates are trending (via `skills/htb-decision-tree`'s self-calibration - see `agents.md#htb-decision-tree`), you need a record of what was actually attempted. There are two tiers, and they're complementary rather than alternatives.
 
 ## Tier 1: Trace log (default, ships with the plugin)
 
@@ -43,4 +43,4 @@ When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`re
 
 - Debugging a single run right after it happened, or you don't want to run any extra infrastructure: **Tier 1**, `scripts/session-review.sh`.
 - Running Clicky across many engagements and want real trend analysis, or you already have an OTel collector: **Tier 2**.
-- Refining `decision-agent`'s learned success rates (its persistent memory — see [Agents](agents.md#persistent-memory)): read Tier 1's output after each engagement; Tier 2 if you want to validate that learning against a larger sample.
+- Refining `htb-decision-tree`'s calibrated success rates (`skills/session-management/scripts/attempt-aggregator.sh`, computed from every session's `logs/attempts.jsonl`) and `decision-agent`'s complementary finer-grained memory (its persistent memory — see [Agents](agents.md#persistent-memory)): read Tier 1's output after each engagement; Tier 2 if you want to validate that learning against a larger sample.

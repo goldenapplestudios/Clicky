@@ -310,13 +310,7 @@ nc -zv {target} 21 22 23 25 80 443 445 3306 3389
 
 `$SESSION_ID` is set earlier in the workflow (`commands/pentest.md` Step 1 exports it) — use the value already in the environment.
 
-```bash
-# Store validation results in session
-${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
-  "$SESSION_ID" "target_validation" "status" "validated" true
-${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
-  "$SESSION_ID" "target_validation" "environment" "{env_type}" true
-```
+No separate persistence call needed here: validation status and environment type are already captured in `$SESSION_DIR/session.json`/`context/` from `commands/pentest.md` Step 1, and `state-persistence.sh record` is reserved for attack-attempt success/failure outcomes (the data `attempt-aggregator.sh` calibrates htb-decision-tree's rates from) - target validation isn't an attack attempt, so it doesn't belong in that stream.
 
 ## Error Handling
 

@@ -246,12 +246,20 @@ When establishing persistence after gaining root:
 
 ## Communication Protocol
 
-Immediately after confirming an escalation vector works (not batched at the end), log it:
+Immediately after **every** escalation attempt - success or failure, not batched at the end - log the outcome:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh record \
+  "$SESSION_ID" "-" "<technique, e.g. sudo_misconfiguration|suid_binary|kernel_exploit|cron_hijack|capability_abuse|token_impersonation|service_misconfiguration|scheduled_task_hijack|docker_group>" \
+  "<one-line outcome>" <true|false> --agent "privesc-agent" [--severity "<SEV>" --finding-id "<id, if also logged below>"]
+```
+`service` is always `"-"` here - privesc techniques aren't port/service-keyed, so this feeds `attempt-aggregator.sh`'s per-technique rates rather than the per-service matrix. This is what makes `skills/htb-decision-tree`'s calibration real; log failed attempts too, not just the vector that eventually worked.
+
+When an escalation vector is confirmed to work, additionally log it as a finding:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh log "$SESSION_ID" "<SEVERITY>" "<description>" \
   --evidence-command "<the exact command that achieved/confirmed it>" --confidence "<confirmed|likely|unconfirmed>" --source-agent "privesc-agent"
 ```
-This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report.
+This persists to `$SESSION_DIR/reports/findings.json`, which the Tier 1 trace cross-check and Tier 2 verification-agent (see `docs/workflow.md`) validate before the finding reaches the final report. Pass the finding's `id` as `--finding-id` on the `state-persistence.sh record` call above so the two records cross-reference.
 
 Upon successful privilege escalation:
 1. **Stabilize root shell**
@@ -261,9 +269,9 @@ Upon successful privilege escalation:
 
 ## Performance Metrics
 
-- Speed: Root within 10 minutes of initial access
-- Success rate: 65% automated, 85% with manual enum
-- Stealth: Avoid detection by AV/EDR
-- Stability: Maintain access for entire operation
+- Speed: check `attempt-aggregator.sh compute`'s `timing_by_agent.privesc-agent.median_seconds_to_first_success` for this operator's real observed median - not a fixed target
+- Success rate: varies by technique - check `attempt-aggregator.sh compute`'s `by_technique` output (keys like `privesc-agent:sudo_misconfiguration`, `privesc-agent:kernel_exploit`) for real measured rates per technique, once enough attempts of that technique have been logged
+- Stealth: Avoid detection by AV/EDR (target, not measured)
+- Stability: Maintain access for entire operation (target, not measured)
 
 Remember: Privilege escalation is the gateway to complete compromise. Be thorough, be persistent, be root.

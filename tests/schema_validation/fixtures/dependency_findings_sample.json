@@ -1,0 +1,15 @@
+{
+  "vulnerabilities": [
+    {
+      "source": "npm-audit",
+      "package": "lodash",
+      "installed_version": "4.17.15",
+      "vulnerability_id": "CVE-2020-8203",
+      "severity": "high",
+      "description": "Prototype pollution in lodash before 4.17.19.",
+      "epss_score": 0.42,
+      "epss_percentile": 0.87,
+      "cisa_kev_listed": false
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "clicky",
   "displayName": "Clicky",
-  "description": "Multi-agent penetration testing framework: orchestrates specialized agents through recon, exploitation, privilege escalation, and looting using decision tree logic derived from pentesting research.",
+  "description": "Multi-agent penetration testing framework: orchestrates specialized agents through recon, exploitation, privilege escalation, and looting using attack-priority logic that self-calibrates from the operator's own accumulated session history, with an honest heuristic fallback until enough data exists.",
   "version": "1.0.0",
   "author": {
     "name": "Kali Jackson"
@@ -56,6 +56,14 @@
       "description": "Controls the PreToolUse scope-enforcement hook. 'enforce' (default): deny out-of-scope targets, ask about unlisted ones. 'warn': never blocks, just logs what it would have done to the session's logs/scope-enforcement.log. 'off': disables the hook entirely. Any other value is treated as 'enforce'.",
       "default": "enforce",
       "required": false
+    },
+    "calibration_min_sample_size": {
+      "type": "number",
+      "title": "Calibration minimum sample size",
+      "description": "Minimum recorded attempts a service/technique needs (across all your sessions, via skills/session-management/scripts/attempt-aggregator.sh) before skills/htb-decision-tree reports a measured success rate for it instead of the honest heuristic fallback. Lower values surface real data sooner but with wider statistical uncertainty.",
+      "default": 5,
+      "min": 1,
+      "max": 100
     }
   }
 }

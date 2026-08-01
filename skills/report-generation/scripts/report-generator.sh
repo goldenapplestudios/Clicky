@@ -253,7 +253,12 @@ generate() {
     local session_id="" format="markdown" output="" template="pentest"
     while [ $# -gt 0 ]; do
         case "$1" in
-            --session-id) session_id="$2"; shift 2 ;;
+            # --session accepted as an alias: main()'s `auto` action forwards
+            # its own "$@" (which uses --session, matching aggregate()'s
+            # flag) straight into generate() unmodified - without this alias
+            # `auto --session ID` always crashed here with "--session-id
+            # required" since generate() never saw the session id at all.
+            --session-id|--session) session_id="$2"; shift 2 ;;
             --format) format="$2"; shift 2 ;;
             --output) output="$2"; shift 2 ;;
             --template) template="$2"; shift 2 ;;

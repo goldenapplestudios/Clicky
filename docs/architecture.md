@@ -32,13 +32,7 @@ Clicky is a **multi-agent orchestration framework** that automates penetration t
 
 ### The Decision Tree
 
-The Clicky decision tree is derived from pentesting research to understand:
-
-- Which services are most commonly exploitable
-- What attack order yields the highest success rate
-- Which techniques work best for each service type
-
-This research drives Clicky's attack prioritization.
+The Clicky decision tree's shape (which service to check, what order to try things in) is a reasonable heuristic starting point; the priority *weighting* behind it - which services are most commonly exploitable, what attack order yields the highest success rate - is self-calibrated from this operator's own accumulated session history (`skills/htb-decision-tree`, see that skill's SKILL.md), not a fixed external research citation. It starts as an honestly-labeled heuristic on a fresh install and gets more accurate as real engagement data accumulates.
 
 ---
 
@@ -234,7 +228,7 @@ Skills are automatically loaded based on agent configuration. When an agent has 
 
 ### What is the Decision Tree?
 
-The **decision tree** is a set of rules derived from pentesting research:
+The **decision tree** is a set of rules; its priority weighting self-calibrates from this operator's own session history rather than a fixed research citation (see `skills/htb-decision-tree/SKILL.md`):
 
 ```mermaid
 flowchart TD
@@ -257,14 +251,14 @@ flowchart TD
     Q4 -->|No| Q5["Check other services"]
 ```
 
-**Why this order?** Based on pentesting research:
+**Why this order?** A reasonable heuristic starting point, refined by real calibrated data as it accumulates (see `service-prioritizer.py --show-matrix` for current values - not a static table maintained here):
 
 | Priority | Service | Why First? |
 |----------|---------|------------|
-| 1 | FTP Anonymous | 100% success when available, often contains credentials |
-| 2 | SMB Null | 75% success, reveals users and files |
-| 3 | HTTP | 85% success, most common attack surface |
-| 4 | SSH | 60% success, requires credentials from earlier phases |
+| 1 | FTP Anonymous | Often contains credentials, when available |
+| 2 | SMB Null | Reveals users and files |
+| 3 | HTTP | Most common attack surface |
+| 4 | SSH | Requires credentials from earlier phases |
 
 ---
 

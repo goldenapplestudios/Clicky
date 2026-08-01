@@ -112,56 +112,54 @@ detect_container() {
 
 # Detect available pentest tools
 detect_pentest_tools() {
-    local tools={}
+    local tools="{}"
+
+    # add_tool_entry <tools_json> <category> <tool> -> updated tools_json.
+    # Uses --arg for the path (via `command -v`, not `which`) instead of
+    # splicing it directly into the jq program text - the previous version
+    # did `'"'$(which $tool)'"'`, which builds the jq filter itself out of
+    # unescaped command output. A tool path containing a double quote or
+    # backslash (rare, but "$HOME/Application Support/tool" style paths do
+    # show up) would have produced a broken jq filter and, under this
+    # function's error handling, silently dropped that tool's entry - or,
+    # since command substitution runs before jq is ever invoked, could
+    # inject arbitrary additional jq filter text.
+    add_tool_entry() {
+        local current="$1" category="$2" tool="$3" version path
+        version=$(get_tool_version "$tool")
+        path=$(command -v "$tool")
+        jq --arg cat "$category" --arg t "$tool" --arg v "$version" --arg p "$path" \
+            '.[$cat][$t] = {"available": true, "version": $v, "path": $p}' <<< "$current"
+    }
 
     # Network tools
     local network_tools=("nmap" "masscan" "rustscan" "zmap" "netcat" "nc" "socat" "tcpdump" "wireshark")
     for tool in "${network_tools[@]}"; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            local version=$(get_tool_version "$tool")
-            tools=$(echo "$tools" | jq --arg t "$tool" --arg v "$version" \
-                '.network[$t] = {"available": true, "version": $v, "path": "'$(which $tool)'"}')
-        fi
+        command -v "$tool" >/dev/null 2>&1 && tools=$(add_tool_entry "$tools" "network" "$tool")
     done
 
     # Web tools
     local web_tools=("gobuster" "dirbuster" "ffuf" "wfuzz" "nikto" "burpsuite" "zaproxy" "sqlmap")
     for tool in "${web_tools[@]}"; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            local version=$(get_tool_version "$tool")
-            tools=$(echo "$tools" | jq --arg t "$tool" --arg v "$version" \
-                '.web[$t] = {"available": true, "version": $v, "path": "'$(which $tool)'"}')
-        fi
+        command -v "$tool" >/dev/null 2>&1 && tools=$(add_tool_entry "$tools" "web" "$tool")
     done
 
     # Exploitation tools
     local exploit_tools=("metasploit" "msfconsole" "searchsploit" "empire" "covenant" "crackmapexec")
     for tool in "${exploit_tools[@]}"; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            local version=$(get_tool_version "$tool")
-            tools=$(echo "$tools" | jq --arg t "$tool" --arg v "$version" \
-                '.exploitation[$t] = {"available": true, "version": $v, "path": "'$(which $tool)'"}')
-        fi
+        command -v "$tool" >/dev/null 2>&1 && tools=$(add_tool_entry "$tools" "exploitation" "$tool")
     done
 
     # Password tools
     local password_tools=("john" "hashcat" "hydra" "medusa" "crowbar" "patator")
     for tool in "${password_tools[@]}"; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            local version=$(get_tool_version "$tool")
-            tools=$(echo "$tools" | jq --arg t "$tool" --arg v "$version" \
-                '.password[$t] = {"available": true, "version": $v, "path": "'$(which $tool)'"}')
-        fi
+        command -v "$tool" >/dev/null 2>&1 && tools=$(add_tool_entry "$tools" "password" "$tool")
     done
 
     # Cloud tools
     local cloud_tools=("aws" "az" "gcloud" "kubectl" "docker" "terraform" "ansible")
     for tool in "${cloud_tools[@]}"; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            local version=$(get_tool_version "$tool")
-            tools=$(echo "$tools" | jq --arg t "$tool" --arg v "$version" \
-                '.cloud[$t] = {"available": true, "version": $v, "path": "'$(which $tool)'"}')
-        fi
+        command -v "$tool" >/dev/null 2>&1 && tools=$(add_tool_entry "$tools" "cloud" "$tool")
     done
 
     echo "$tools"

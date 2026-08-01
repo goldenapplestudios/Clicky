@@ -13,11 +13,20 @@ capture one (headless-browser screenshot, terminal capture, etc.) to save
 to directly.
 """
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
 
-EVIDENCE_ROOT = Path("evidence")
+# Rooted under $SESSION_DIR (set by commands/pentest.md Step 1, same
+# convention every other script in this codebase uses) when running as
+# part of a real engagement, so evidence lands inside the session
+# directory tree - and gets swept along by session-manager.sh's
+# archive_session() - instead of scattering into whatever directory
+# Claude's Bash tool happened to have as its cwd. Falls back to a plain
+# relative "evidence" dir only when SESSION_DIR isn't set (e.g. ad hoc
+# use outside a session).
+EVIDENCE_ROOT = Path(os.environ["SESSION_DIR"]) / "evidence" if os.environ.get("SESSION_DIR") else Path("evidence")
 
 
 def cmd_screenshot(args):
