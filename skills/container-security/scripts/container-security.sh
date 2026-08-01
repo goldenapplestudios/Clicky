@@ -50,24 +50,24 @@ test_kubernetes_api() {
         echo -e "${GREEN}[+] Kubernetes API is reachable on $target:$port${NC}"
 
         # Test unauthenticated access
-        response=$(curl -sk "https://$target:$port/api" 2>/dev/null || echo "")
+        response=$(curl -sk --max-time 10 "https://$target:$port/api" 2>/dev/null || echo "")
         if echo "$response" | grep -q "kind.*APIVersions"; then
             echo -e "${RED}[!] Kubernetes API accessible!${NC}"
 
             # Try to list namespaces
-            namespaces=$(curl -sk "https://$target:$port/api/v1/namespaces" 2>/dev/null || echo "")
+            namespaces=$(curl -sk --max-time 10 "https://$target:$port/api/v1/namespaces" 2>/dev/null || echo "")
             if echo "$namespaces" | grep -q "NamespaceList"; then
                 echo -e "${RED}[!] CRITICAL: Can list namespaces without authentication!${NC}"
             fi
 
             # Try to list pods
-            pods=$(curl -sk "https://$target:$port/api/v1/pods" 2>/dev/null || echo "")
+            pods=$(curl -sk --max-time 10 "https://$target:$port/api/v1/pods" 2>/dev/null || echo "")
             if echo "$pods" | grep -q "PodList"; then
                 echo -e "${RED}[!] CRITICAL: Can list pods without authentication!${NC}"
             fi
 
             # Try to list secrets
-            secrets=$(curl -sk "https://$target:$port/api/v1/secrets" 2>/dev/null || echo "")
+            secrets=$(curl -sk --max-time 10 "https://$target:$port/api/v1/secrets" 2>/dev/null || echo "")
             if echo "$secrets" | grep -q "SecretList"; then
                 echo -e "${RED}[!] CRITICAL: Can list secrets without authentication!${NC}"
             fi
@@ -79,7 +79,7 @@ test_kubernetes_api() {
             echo -e "${YELLOW}[*] Testing with service account token...${NC}"
 
             # Check permissions
-            auth_response=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+            auth_response=$(curl -sk --max-time 10 -H "Authorization: Bearer $TOKEN" \
                 "https://$target:$port/api/v1/namespaces/default/pods" 2>/dev/null || echo "")
 
             if echo "$auth_response" | grep -q "PodList"; then
@@ -154,13 +154,13 @@ enumerate_k8s_resources() {
     if nc -zv -w2 "$target" 2379 2>&1 | grep -q "succeeded\|open"; then
         echo -e "${RED}[!] etcd port 2379 is open!${NC}"
         # Test etcd access
-        curl -s "http://$target:2379/v2/keys/" 2>/dev/null | head -20
+        curl -s --max-time 10 "http://$target:2379/v2/keys/" 2>/dev/null | head -20
     fi
 
     # Check for kubelet read-only port
     if nc -zv -w2 "$target" 10255 2>&1 | grep -q "succeeded\|open"; then
         echo -e "${YELLOW}[!] Kubelet read-only port 10255 is open${NC}"
-        curl -s "http://$target:10255/pods" 2>/dev/null | head -20
+        curl -s --max-time 10 "http://$target:10255/pods" 2>/dev/null | head -20
     fi
 
     # Check for kubelet authenticated port
@@ -187,7 +187,7 @@ check_k8s_misconfigurations() {
     # Check for exposed dashboard
     local dashboard_ports=(443 8443 8001 30000)
     for port in "${dashboard_ports[@]}"; do
-        if curl -sk "https://localhost:$port" 2>/dev/null | grep -q "kubernetes-dashboard"; then
+        if curl -sk --max-time 10 "https://localhost:$port" 2>/dev/null | grep -q "kubernetes-dashboard"; then
             echo -e "${RED}[!] Kubernetes Dashboard exposed on port $port${NC}"
         fi
     done

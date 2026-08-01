@@ -16,7 +16,7 @@ detect_cloud_by_ip() {
     fi
 
     # Check AWS IP ranges
-    if curl -s https://ip-ranges.amazonaws.com/ip-ranges.json 2>/dev/null | grep -q "$ip"; then
+    if curl -s --max-time 10 https://ip-ranges.amazonaws.com/ip-ranges.json 2>/dev/null | grep -q "$ip"; then
         echo "AWS"
         return 0
     fi
@@ -47,12 +47,17 @@ check_s3_buckets() {
         local bucket_name="${keyword}-${domain}"
         local bucket_url="https://${bucket_name}.s3.amazonaws.com"
 
-        # Check if bucket exists
-        if curl -s -I "$bucket_url" 2>/dev/null | grep -q "200\|403"; then
-            echo "[+] Potential S3 bucket found: $bucket_url"
+        # Check if bucket exists - status code via -w, not grep over raw
+        # header text: a plain `grep -q "200\|403"` over -I output also
+        # matches e.g. a "Content-Length: 1200" or "x-amz-id-2: ...403..."
+        # header that has nothing to do with the actual HTTP status line.
+        local status_code
+        status_code=$(curl -s --max-time 10 -I -o /dev/null -w "%{http_code}" "$bucket_url" 2>/dev/null)
+        if [ "$status_code" = "200" ] || [ "$status_code" = "403" ]; then
+            echo "[+] Potential S3 bucket found: $bucket_url (HTTP $status_code)"
 
             # Check if publicly accessible
-            if curl -s "$bucket_url" 2>/dev/null | grep -q "ListBucketResult"; then
+            if curl -s --max-time 10 "$bucket_url" 2>/dev/null | grep -q "ListBucketResult"; then
                 echo "[!] PUBLIC S3 BUCKET: $bucket_url"
             fi
         fi
@@ -69,8 +74,14 @@ check_azure_storage() {
     for account in "${storage_accounts[@]}"; do
         local storage_url="https://${account}${domain//./}.blob.core.windows.net"
 
-        if curl -s -I "$storage_url" 2>/dev/null | grep -q "200\|403\|404"; then
-            echo "[+] Potential Azure storage: $storage_url"
+        # "200\|403\|404" via grep over -I output was really just asking
+        # "did the vhost resolve and answer HTTP at all" - curl's %{http_code}
+        # gives that directly (and "000" specifically means no HTTP response
+        # was received), without the same raw-header substring-collision risk.
+        local status_code
+        status_code=$(curl -s --max-time 10 -I -o /dev/null -w "%{http_code}" "$storage_url" 2>/dev/null)
+        if [ -n "$status_code" ] && [ "$status_code" != "000" ]; then
+            echo "[+] Potential Azure storage: $storage_url (HTTP $status_code)"
         fi
     done
 }
@@ -110,11 +121,11 @@ check_kubernetes() {
     for port in "${k8s_ports[@]}"; do
         if nc -zv -w2 "$target" "$port" 2>&1 | grep -q "succeeded\|open"; then
             # Check for K8s API
-            if curl -sk "https://${target}:${port}/api" 2>/dev/null | grep -q "kubernetes"; then
+            if curl -sk --max-time 10 "https://${target}:${port}/api" 2>/dev/null | grep -q "kubernetes"; then
                 echo "[!] KUBERNETES API FOUND on port $port"
 
                 # Check if unauthenticated
-                if curl -sk "https://${target}:${port}/api/v1/namespaces" 2>/dev/null | grep -q "namespace"; then
+                if curl -sk --max-time 10 "https://${target}:${port}/api/v1/namespaces" 2>/dev/null | grep -q "namespace"; then
                     echo "[!] UNAUTHENTICATED KUBERNETES API!"
                 fi
             fi
@@ -128,10 +139,15 @@ check_container_registries() {
 
     echo "[*] Checking for container registries..." >&2
 
-    # Docker Hub
+    # Docker Hub - a v2 registry API answers 200 (anonymous access allowed)
+    # or 401 (auth required, but the registry is definitely there) at this
+    # path; checking the status code directly rather than grepping the
+    # response body for those digits (which normally isn't even present).
     local docker_registry="registry.${domain}"
-    if curl -s "https://${docker_registry}/v2/" 2>/dev/null | grep -q "200\|401"; then
-        echo "[+] Docker registry found: $docker_registry"
+    local status_code
+    status_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "https://${docker_registry}/v2/" 2>/dev/null)
+    if [ "$status_code" = "200" ] || [ "$status_code" = "401" ]; then
+        echo "[+] Docker registry found: $docker_registry (HTTP $status_code)"
     fi
 
     # AWS ECR

@@ -146,6 +146,12 @@ When asked to analyze a failed attempt:
 - Suggest UDP scan of top 1000 ports
 - Check for non-standard service ports
 
+3. **Activate bounded auto-retry, if warranted** - not every failure deserves this, but when the failure type matches one `skills/session-management/scripts/pentest-recovery-hook.sh` has a real strategy list for (`connection_refused`, `authentication_failed`, `exploit_failed`, `no_vector_found`) and retrying with the next strategy is worth doing without waiting for the operator, activate it:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh init "$target" "<connection_refused|authentication_failed|exploit_failed|no_vector_found>"
+```
+Once active, the `Stop` hook takes over automatically - it actually blocks Claude from stopping (see `skills/session-management/SKILL.md`'s Recovery Mechanisms section for the real JSON-based mechanism, not just a printed suggestion) and surfaces the next strategy each time, up to 5 attempts or until a CRITICAL/HIGH confirmed finding shows up. This is a real decision to hand control to a bounded retry loop, not a default - don't call `init` for a failure you'd rather report to the operator as-is.
+
 ## MITRE ATT&CK Mapping
 
 Map discovered vectors to MITRE techniques:

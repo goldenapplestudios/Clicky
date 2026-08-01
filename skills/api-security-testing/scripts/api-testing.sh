@@ -33,7 +33,7 @@ test_jwt() {
 
     # Test for none algorithm
     local none_token="${header}.${payload}."
-    response=$(curl -s -H "Authorization: Bearer $none_token" "$endpoint")
+    response=$(curl -s --max-time 10 -H "Authorization: Bearer $none_token" "$endpoint")
     if ! echo "$response" | grep -q "invalid\|unauthorized\|401\|403"; then
         echo -e "${RED}[!] VULNERABLE: JWT none algorithm accepted!${NC}"
     fi
@@ -54,7 +54,7 @@ test_graphql() {
     # Test introspection query
     local introspection_query='{"query":"{ __schema { types { name fields { name } } } }"}'
 
-    response=$(curl -s -X POST \
+    response=$(curl -s --max-time 10 -X POST \
         -H "Content-Type: application/json" \
         -d "$introspection_query" \
         "$endpoint" 2>/dev/null)
@@ -65,7 +65,7 @@ test_graphql() {
 
         # Test for query depth attack
         local depth_query='{"query":"{ user { posts { comments { user { posts { comments { user { name } } } } } } } }"}'
-        depth_response=$(curl -s -X POST \
+        depth_response=$(curl -s --max-time 10 -X POST \
             -H "Content-Type: application/json" \
             -d "$depth_query" \
             "$endpoint" 2>/dev/null)
@@ -101,7 +101,7 @@ test_rest_api() {
     fi
 
     for endpoint in "${endpoints[@]}"; do
-        response_code=$(curl -s -o /dev/null -w "%{http_code}" "$base_url$endpoint")
+        response_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$base_url$endpoint")
         if [ "$response_code" != "404" ] && [ "$response_code" != "000" ]; then
             echo -e "${GREEN}[+] Found endpoint: $endpoint (HTTP $response_code)${NC}"
 
@@ -115,7 +115,7 @@ test_rest_api() {
     # Test HTTP methods
     echo -e "${YELLOW}[*] Testing HTTP methods...${NC}"
     for method in GET POST PUT DELETE PATCH OPTIONS HEAD TRACE; do
-        response_code=$(curl -s -X $method -o /dev/null -w "%{http_code}" "$base_url")
+        response_code=$(curl -s --max-time 10 -X $method -o /dev/null -w "%{http_code}" "$base_url")
         if [ "$response_code" != "405" ] && [ "$response_code" != "000" ]; then
             echo "  $method: $response_code"
         fi
@@ -131,7 +131,7 @@ test_rate_limiting() {
     # Send 20 rapid requests
     local success_count=0
     for i in {1..20}; do
-        response_code=$(curl -s -o /dev/null -w "%{http_code}" "$endpoint")
+        response_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$endpoint")
         if [ "$response_code" == "200" ]; then
             ((success_count++))
         elif [ "$response_code" == "429" ]; then
@@ -152,7 +152,7 @@ test_cors() {
     echo -e "${YELLOW}[*] Testing CORS configuration...${NC}"
 
     # Test with evil origin
-    response=$(curl -s -I -H "Origin: https://evil.com" "$endpoint")
+    response=$(curl -s --max-time 10 -I -H "Origin: https://evil.com" "$endpoint")
 
     if echo "$response" | grep -i "access-control-allow-origin: \*\|access-control-allow-origin: https://evil.com"; then
         echo -e "${RED}[!] CORS misconfiguration detected - wildcard or reflects origin${NC}"
@@ -179,7 +179,7 @@ test_api_versions() {
         for pattern in "/api/$version" "/$version/api" "/api.$version" ""; do
             if [ -n "$pattern" ]; then
                 url="$base_url$pattern"
-                response_code=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+                response_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$url")
                 if [ "$response_code" != "404" ] && [ "$response_code" != "000" ]; then
                     echo -e "${GREEN}[+] Found API version: $url (HTTP $response_code)${NC}"
                 fi
@@ -195,7 +195,7 @@ test_api_keys() {
     echo -e "${YELLOW}[*] Testing API key security...${NC}"
 
     # Test without API key
-    response_code=$(curl -s -o /dev/null -w "%{http_code}" "$endpoint")
+    response_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$endpoint")
     if [ "$response_code" == "200" ]; then
         echo -e "${RED}[!] API accessible without authentication!${NC}"
     fi
@@ -206,7 +206,7 @@ test_api_keys() {
 
     for header in "${headers[@]}"; do
         for key in "${common_keys[@]}"; do
-            response_code=$(curl -s -o /dev/null -w "%{http_code}" -H "$header: $key" "$endpoint")
+            response_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -H "$header: $key" "$endpoint")
             if [ "$response_code" == "200" ]; then
                 echo -e "${RED}[!] Weak API key accepted: $header: $key${NC}"
             fi
@@ -279,7 +279,7 @@ main() {
     echo ""
 
     # Determine API type
-    if curl -s "$target" | grep -q "graphql\|GraphQL"; then
+    if curl -s --max-time 10 "$target" | grep -q "graphql\|GraphQL"; then
         test_graphql "$target"
     fi
 

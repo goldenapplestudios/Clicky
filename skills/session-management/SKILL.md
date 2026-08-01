@@ -62,15 +62,19 @@ ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/state-persistence.sh sum
 ```
 
 ### Recovery Mechanisms
-The `Stop` hook (`hooks/hooks.json`) already runs `pentest-recovery-hook.sh` automatically with no arguments (defaults to its `check` action) whenever a session stops - you don't normally invoke this directly. Its real subcommands, for reference:
-```bash
-# Activate recovery mode after a failure
-${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh init "{target}" "{failure_type}"
+The `Stop` hook (`hooks/hooks.json`) already runs `pentest-recovery-hook.sh` automatically with no arguments (defaults to its `check` action) whenever a session would otherwise stop - you don't normally invoke `check` directly. When recovery is active, `check` actually prevents Claude from stopping: Claude Code's Stop hook contract only blocks on an exit-0 process that prints `{"decision": "block", "reason": "..."}` to stdout (verified against `code.claude.com/docs/en/hooks`), which is what `check` does - it isn't just printing a suggestion nobody reads. It gives up and lets Claude actually stop after `MAX_RECOVERY_ATTEMPTS` (5) blocked attempts, well under Claude Code's own hard cap of 8 consecutive Stop-hook blocks per turn, or as soon as a CRITICAL/HIGH `confidence: "confirmed"` finding appears in the active session's `findings.json` after recovery started (`check_completion()` - real data every agent's Communication Protocol already writes, not a magic string a transcript has to contain).
 
-# Check recovery status and execute the next strategy (what the Stop hook calls automatically)
+Recovery mode is **not** activated automatically - something has to call `init` first. `decision-agent`'s Failure Recovery Analysis is the natural trigger point: after it identifies a failure pattern worth a bounded auto-retry (not every failure warrants blocking Claude from stopping), call `init` with the failure type it classified.
+```bash
+# Activate recovery mode after a failure decision-agent has classified
+${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh init "{target}" "{failure_type}"
+# failure_type: connection_refused | authentication_failed | exploit_failed | no_vector_found
+
+# Check recovery status (what the Stop hook calls automatically - see above)
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh check
 
-# Deactivate recovery mode
+# Deactivate recovery mode - the operator's manual escape hatch if an
+# active recovery loop isn't converging and should stop blocking
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/pentest-recovery-hook.sh stop
 ```
 

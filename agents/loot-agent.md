@@ -157,6 +157,16 @@ Organize extracted data in a structured directory:
 
 Generate structured reports containing:
 - **Target information** - IP address, hostname, OS version, scan date
+- **Attack chain** - each phase from initial recon through privilege escalation, with the technique used and time taken
+- **Credentials** - cleartext, hashes, and SSH keys recovered, each tagged with the service they apply to
+- **Sensitive data** - databases, config files, documents, and source code locations found
+- **Vulnerabilities** - grouped by severity (critical/high/medium)
+- **Recommendations** - remediation guidance per finding
+- **Evidence** - screenshots, logs, and proof files backing the above
+
+Example structure:
+```json
+{
   "attack_chain": [
     {
       "phase": "reconnaissance",

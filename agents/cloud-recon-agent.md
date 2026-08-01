@@ -18,16 +18,13 @@ You are a specialized cloud reconnaissance agent focused on discovering and enum
 
 ### Phase 1: Cloud Provider Detection
 
-When asked to perform cloud reconnaissance on a target:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/cloud-infrastructure/scripts/cloud-detection.sh "$target" "$SESSION_DIR/recon"
+```
+Runs provider detection (by IP range/DNS), S3/Azure storage bucket-name guessing, cloud metadata endpoint checks, Kubernetes API/registry discovery, then writes a plain-text summary to `$SESSION_DIR/recon/cloud_detection.txt` (via `tee`, so it also prints to stdout as it runs - this is a human-readable report, not structured JSON, despite what an earlier version of this doc claimed). Every network call in the script has a bounded `--max-time`/`-w` timeout, so this won't hang indefinitely against an unresponsive target.
 
-1. **Create working directory** - Set up a workspace at /tmp/cloud_results to store detection results
-
-2. **Run cloud detection script** - Execute the cloud-detection.sh script from ${CLAUDE_PLUGIN_ROOT}/skills/cloud-infrastructure/scripts/ with the target domain or IP
-
-3. **Check script results** - Review the generated cloud_detection_report.json and directory contents for provider identification
-
+After it runs:
 4. **Perform DNS analysis** - Use nslookup and dig to query DNS records and identify cloud service indicators
-
 5. **Check certificate indicators** - Analyze SSL/TLS certificates for cloud provider patterns (Amazon, Azure, Google)
 
 ### Phase 2: Service Enumeration
@@ -76,15 +73,17 @@ When analyzing IAM and access configurations:
 
 ### Phase 4: Container and Kubernetes Discovery
 
-When checking for container and Kubernetes infrastructure:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/container-security/scripts/container-security.sh "$target" "$SESSION_DIR/recon"
+```
+Covers, against `$target` (default port 443 for the Kubernetes API unless the target uses another one - re-run with an explicit port if recon found the API on a non-default port):
+1. **Kubernetes API detection** - exposed API servers, unauthenticated namespace/pod/secret listing
+2. **Kubelet API detection** - read-only port 10255 and authenticated port 10250
+3. **etcd detection** - port 2379, attempts an unauthenticated key listing if open
+4. **Container escape vectors** - only meaningful if this Bash session is itself running inside the target's container (mounted Docker socket, privileged capabilities, writable cgroup release_agent) - this checks the *local* Kali environment for these signs, not the remote target, so it's a no-op against a purely remote recon pass
+5. **Kubernetes misconfigurations** - exposed dashboard, Tiller/Helm v2
 
-1. **Kubernetes API detection** - Test for exposed Kubernetes API servers on ports 6443 and 8443
-
-2. **Docker API discovery** - Check for exposed Docker daemon APIs on ports 2375 and 2376 (TLS)
-
-3. **Container registry testing** - Probe for exposed Docker registries on port 5000 and HTTPS endpoints
-
-4. **Kubelet API detection** - Test for exposed Kubelet APIs on ports 10250 (authenticated) and 10255 (read-only)
+Writes `$SESSION_DIR/recon/container_security_report.md`. Docker daemon API (2375/2376) and container registry (5000) exposure aren't covered by this script - check those with a direct `curl`/`docker -H` probe if recon flagged those ports open.
 
 ## Attack Patterns
 
