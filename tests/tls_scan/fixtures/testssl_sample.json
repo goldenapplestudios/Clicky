@@ -1,0 +1,15 @@
+[
+  {"id": "SSLv3", "finding": "not offered", "severity": "OK"},
+  {"id": "TLS1", "finding": "offered", "severity": "MEDIUM"},
+  {"id": "TLS1_1", "finding": "offered", "severity": "MEDIUM"},
+  {"id": "TLS1_2", "finding": "offered", "severity": "OK"},
+  {"id": "TLS1_3", "finding": "offered", "severity": "OK"},
+  {"id": "cert_commonName", "finding": "example.com", "severity": "INFO"},
+  {"id": "cert_caIssuers", "finding": "Let's Encrypt", "severity": "INFO"},
+  {"id": "cert_notAfter", "finding": "2027-01-01 00:00", "severity": "INFO"},
+  {"id": "cert_expirationStatus", "finding": "expires in 60 days", "severity": "OK"},
+  {"id": "cert_chain_of_trust", "finding": "passed", "severity": "OK"},
+  {"id": "heartbleed", "finding": "not vulnerable", "severity": "OK"},
+  {"id": "POODLE_SSL", "finding": "not vulnerable", "severity": "OK"},
+  {"id": "ROBOT", "finding": "VULNERABLE, weak key", "severity": "HIGH"}
+]

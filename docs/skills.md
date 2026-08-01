@@ -136,16 +136,23 @@ Findings carry a `confidence` of `high` (source and sink both matched) or `low` 
 
 ### web-vulnerability-testing
 
-Web application attack techniques.
+Web application attack techniques. Most of this skill is payload-reference prose (SQLi/XSS/LFI/RFI/command-injection/auth-bypass/upload payloads), but it also has two real scripts covering categories that don't reduce to a payload list:
+
+- `scripts/tls-scan.sh --target <host> [--port 443] [--output <json>]` — TLS/certificate weaknesses (deprecated protocol versions, expired/self-signed/hostname-mismatched certs, known CVEs when `testssl.sh` is available). Tool-preference cascade: `testssl.sh` → `sslscan` → `nmap` → an `openssl s_client` fallback that's always available but coarser (protocol-negotiation only, no cipher-suite/CVE detection) — the output's `tool_used` field says which one ran.
+- `scripts/security-headers-check.sh --url <url> [--auth-file <path>] [--output <json>]` — one fetch covering clickjacking (`X-Frame-Options`/CSP `frame-ancestors` absence), CSRF passive signals (`SameSite` cookie attribute, anti-CSRF token field presence in forms — a lead worth confirming manually, not a functional CSRF exploit test), and HSTS/`X-Content-Type-Options` presence.
 
 ```mermaid
 flowchart TD
     WEB[Web Target] --> ENUM[Enumerate]
     ENUM --> DIR[Directory Brute]
     ENUM --> TECH[Tech Detection]
+    ENUM --> TLS[TLS/Cert Scan]
+    ENUM --> HDRS[Security Headers]
 
     DIR --> VULNS{Vulnerabilities}
     TECH --> VULNS
+    TLS --> VULNS
+    HDRS --> VULNS
 
     VULNS --> SQLI[SQL Injection]
     VULNS --> XSS[Cross-Site Scripting]
@@ -153,6 +160,8 @@ flowchart TD
     VULNS --> UPLOAD[File Upload]
     VULNS --> CMDI[Command Injection]
     VULNS --> AUTH[Auth Bypass]
+    VULNS --> CLICKJACK[Clickjacking]
+    VULNS --> CSRF[CSRF]
 ```
 
 | Vulnerability | Detection | Exploitation |
@@ -162,6 +171,9 @@ flowchart TD
 | LFI | Path traversal | PHP wrappers |
 | Upload | Extension test | Webshell |
 | CMDi | Delimiter test | OS commands |
+| TLS/cert weaknesses | `tls-scan.sh` | Protocol downgrade, cert-trust abuse |
+| Clickjacking | `security-headers-check.sh` | Framed state-changing action |
+| CSRF | `security-headers-check.sh` (passive signal only) | Manual cross-origin forged request |
 
 ### api-security-testing
 
@@ -173,6 +185,9 @@ API attack techniques.
 | GraphQL | Introspection | Query manipulation |
 | JWT | Token analysis | Algorithm confusion |
 | OAuth | Flow analysis | Token theft |
+| Shadow/historical APIs | `scripts/shadow-api-discovery.sh --domain <domain> [--known-endpoints-file <file>] [--output <json>]` | Unmonitored endpoint still reachable |
+
+`shadow-api-discovery.sh` covers OWASP API9:2023 (Improper Inventory Management) beyond live-endpoint discovery: one free, unauthenticated call to the Wayback Machine's CDX API for historically-indexed `/api/*` paths under a domain, diffed against a plain JSON array of currently-known endpoints if given. `shadow_endpoints` in its output is what was indexed historically but is absent from current discovery — a lead worth confirming by hand, not a confirmed finding on its own.
 
 **MITRE Techniques**: T1550.001 (JWT/token theft). Most API-specific vulnerability classes (IDOR, mass assignment, CORS, SSRF) don't have clean MITRE ATT&CK mappings — ATT&CK models adversary behavior, not web-app vulnerability taxonomy. See the [OWASP API Security Top 10](skills.md#api-security-testing) mapping in `api-security-testing/SKILL.md` instead.
 
@@ -491,5 +506,5 @@ The agent then has access to the skill's SKILL.md content and can execute script
 
 ```bash
 # Using a skill script
-skills/web-vulnerability-testing/scripts/sqli-test.sh http://target/login
+skills/web-vulnerability-testing/scripts/tls-scan.sh --target host --port 443 --output tls_scan.json
 ```

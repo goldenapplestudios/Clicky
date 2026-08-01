@@ -561,7 +561,7 @@ Use this to make sure findings are categorized consistently with the official st
 | API6:2023 | Unrestricted Access to Sensitive Business Flows | See below |
 | API7:2023 | Server-Side Request Forgery | See below |
 | API8:2023 | Security Misconfiguration | CORS Misconfiguration / Security Headers sections above |
-| API9:2023 | Improper Inventory Management | API Discovery section above (partial — see below) |
+| API9:2023 | Improper Inventory Management | API Discovery section above, plus `shadow-api-discovery.sh` for historical/shadow endpoints — see below |
 | API10:2023 | Unsafe Consumption of APIs | See below |
 
 ### API5:2023 - Broken Function Level Authorization (BFLA)
@@ -598,7 +598,12 @@ See also `agents/exploit-agent.md`'s SSRF section and `skills/web-vulnerability-
 ### API9:2023 - Improper Inventory Management (beyond basic discovery)
 - **Deprecated/old API versions still live** - test `/api/v1/` alongside `/api/v2/`; old versions often lack the security fixes the current version has
 - **Non-production environments exposed** - check for `/api-staging`, `/api-dev`, `/api-test` subdomains or paths with weaker auth
-- **Shadow APIs** - endpoints found in client-side code, mobile app binaries, or historical API docs (Wayback Machine) that aren't in the current official documentation at all
+- **Shadow APIs** - endpoints found in client-side code, mobile app binaries, or historical API docs that aren't in the current official documentation at all. The Wayback Machine check is scripted:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/api-security-testing/scripts/shadow-api-discovery.sh --domain {domain} \
+  --known-endpoints-file known_endpoints.json --output shadow_api.json
+```
+One free, unauthenticated call to the Wayback Machine's CDX API for historically-indexed `/api/*` paths under the domain, diffed against a plain JSON array of currently-known endpoints (build that array from recon-agent's output first — see the script's header comment for the exact `jq` recipe). `shadow_endpoints` in the output is what was indexed historically but isn't in current discovery - a real lead worth confirming by hand (still reachable? still accepting the same auth?), not a confirmed finding on its own.
 
 ### API10:2023 - Unsafe Consumption of APIs
 This is about *this* application's blind trust in the *third-party* APIs it calls, not APIs it exposes:

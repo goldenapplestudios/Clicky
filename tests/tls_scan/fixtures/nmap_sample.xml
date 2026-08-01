@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <script id="ssl-enum-ciphers" output="TLSv1.2: &#10;  ciphers: ...&#10;TLSv1.3: &#10;  ciphers: ...&#10;" />
+        <script id="ssl-cert" output="Subject: commonName=example.com&#10;Issuer: commonName=Test CA&#10;Not valid after:  2020-01-01T00:00:00&#10;" />
+        <script id="ssl-heartbleed" output="VULNERABLE:&#10;SSL Heartbeat Information Leak" />
+      </port>
+    </ports>
+  </host>
+</nmaprun>

@@ -217,7 +217,20 @@ curl http://{target_IP}/.env || wget -q -O - http://{target_IP}/.env
 # calls). See skills/web-crawling.
 ${CLAUDE_PLUGIN_ROOT}/skills/web-crawling/scripts/crawl.sh crawl --url "http://{target_IP}" \
   --output "$SESSION_DIR/recon/crawl_{target_IP}.json"
+
+# TLS/certificate weaknesses (HTTPS/443 only) - deprecated protocol
+# versions, expired/self-signed/hostname-mismatched certs, known TLS CVEs
+# when testssl.sh is available. See skills/web-vulnerability-testing.
+${CLAUDE_PLUGIN_ROOT}/skills/web-vulnerability-testing/scripts/tls-scan.sh --target {target_IP} --port 443 \
+  --output "$SESSION_DIR/recon/tls_scan_{target_IP}.json"
+
+# Clickjacking (missing X-Frame-Options/CSP frame-ancestors) and CSRF
+# passive signals (SameSite cookies, anti-CSRF token fields), one fetch.
+${CLAUDE_PLUGIN_ROOT}/skills/web-vulnerability-testing/scripts/security-headers-check.sh --url "http://{target_IP}" \
+  --output "$SESSION_DIR/recon/security_headers_{target_IP}.json"
 ```
+
+Both are passive/read-only characterization, not exploitation attempts - like the rest of this phase, they're not wired into `state-persistence.sh record`/`attempt-aggregator.sh` (recon-agent isn't part of that self-calibration population - see `agents/cloud-recon-agent.md`'s equivalent note). `exploit-agent` reads these two JSON files directly rather than re-fetching when it evaluates Web Service Exploitation.
 
 If `.git/config` returns real content (not a 404/blank), set `git_exposure_detected: true` in your output - this opportunistically triggers `source-analyzer-agent` (see `commands/pentest.md`) to pull and analyze the exposed source, at essentially zero extra recon cost since this probe already runs. Don't attempt the source acquisition/analysis yourself - that's a distinct agent with its own skill (`source-code-analysis`).
 

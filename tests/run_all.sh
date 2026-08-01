@@ -34,5 +34,7 @@ run "prompt-injection-probe canary detection (real mock HTTP server)" "$HERE/pro
 run "converter schema validation (real SARIF 2.1.0 / CycloneDX 1.5 schemas)" python3 "$HERE/schema_validation/test_schema_validation.py"
 run "finding-validator Tier 1 trace cross-check (fixtures)" "$HERE/finding_validator/test_finding_validator.sh"
 run "attempt-aggregator calibration (fixtures)" "$HERE/calibration/test_calibrate_success_rates.sh"
+run "tls-scan.sh (real self-signed server + testssl/sslscan/nmap fixtures)" "$HERE/tls_scan/test_tls_scan.sh"
+run "security-headers-check.sh (real mock HTTP server)" "$HERE/security_headers/test_security_headers_check.sh"
 
 exit $FAILED
