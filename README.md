@@ -64,6 +64,16 @@ Also generated for [Codex CLI](https://developers.openai.com/codex) - agents liv
 
 `run-clicky-agent.sh` pins `-m gpt-5.4` and passes `--disable shell_tool` on every invocation - both are real, live-confirmed requirements, not defaults: Codex's own default model has an open upstream bug (`openai/codex#32101`) that silently drops MCP tool exposure for some models, and Codex has no `permission: deny`-style mechanism the way OpenCode does, so `--disable shell_tool` is the confirmed-working lever for denying direct shell access while keeping gateway tools available. Both were found and fixed after an initial live test looked like a hard blocker - see `tools/generate-cli-targets.py`'s Codex section doc comment for the full story, including why containerizing wouldn't have helped (the bug is proven application-level, not environment-level) and how a real adversarial test and a real end-to-end scan against `scanme.nmap.org` confirmed the fix.
 
+### Copilot CLI
+
+Also generated for [GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli) (the standalone `copilot` binary, not `gh copilot` or the VS Code extension) - agents live in `.github/agents/*.md`, fully project-scoped, no install step needed:
+
+```bash
+./tools/run-clicky-copilot-agent.sh "Recon example.com"
+```
+
+Each generated agent embeds its own MCP server registration directly in its frontmatter rather than relying on a shared workspace `.mcp.json` - confirmed live that workspace-level MCP config is currently broken in Copilot CLI (`github/copilot-cli#3126`, open) and never actually reaches the model, even though it registers without error. Skills are exposed via a `.claude/skills -> ../skills` symlink, which Copilot CLI reads natively. See `tools/generate-cli-targets.py`'s Copilot section doc comment for the full verification record, including a real adversarial shell-denial test and a real orchestrator-to-leaf-agent delegation via Copilot's `task` tool.
+
 ## Quick Start
 
 ```bash
