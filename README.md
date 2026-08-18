@@ -32,7 +32,7 @@ Every agent calls the target only through the `clicky-gateway` MCP server (see [
 
 ## Installation
 
-Clicky is a Claude Code plugin. Install it locally for development, or add it via its bundled marketplace:
+Clicky is built as a Claude Code plugin. Install it locally for development, or add it via its bundled marketplace:
 
 ```bash
 # Local development: run from a clone of this repo
@@ -42,6 +42,16 @@ claude --plugin-dir .
 /plugin marketplace add goldenapplestudios/Clicky
 /plugin install clicky@clicky
 ```
+
+### OpenCode
+
+Clicky also runs under [OpenCode](https://opencode.ai), generated from the same `agents/*.md`/`commands/*.md` source of truth via `tools/generate-cli-targets.py` (checked-in output, no need to run the generator yourself unless you're editing an agent). From a clone of this repo with `opencode` installed:
+
+```bash
+opencode run "Recon example.com" --agent recon-agent   # or: opencode, then /pentest <target>
+```
+
+The generated `.opencode/agents/*.md` carry the exact same "no direct tool access, gateway only" security model as the Claude Code agents - each one explicitly denies every OpenCode built-in tool (`bash`/`edit`/`write`/`read`/etc.) and allows only its specific `clicky-gateway_*` MCP tools, confirmed live against a real installed binary (see `tools/generate-cli-targets.py`'s own doc comments for the full verification record, including a real adversarial test and a real end-to-end scan).
 
 ## Quick Start
 

@@ -42,5 +42,6 @@ run "attempt-aggregator calibration (fixtures)" "$HERE/calibration/test_calibrat
 run "tls-scan.sh (real self-signed server + testssl/sslscan/nmap fixtures)" "$HERE/tls_scan/test_tls_scan.sh"
 run "security-headers-check.sh (real mock HTTP server)" "$HERE/security_headers/test_security_headers_check.sh"
 run "mcp-gateway suite (token_store/scope_gate/provision-venv/launch.sh + live MCP protocol check)" "$HERE/mcp_gateway/run_tests.sh"
+run "OpenCode target generation (drift check + live permission-resolution check if opencode is installed)" "$HERE/cli_targets/test_opencode_generation.sh"
 
 exit $FAILED
