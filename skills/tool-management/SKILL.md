@@ -33,8 +33,33 @@ ${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-check.sh
 ```
 
 ### Get Fallback Commands
+
+Bare tool-name mode - resolves a specific tool to the best available option in
+its category (the tool itself if installed, otherwise the best detected
+fallback tool name, or `none`/`manual` if nothing is available). This is the
+form agents use before invoking a possibly-missing tool; no target is needed
+since it returns a tool name, not a ready-to-run command:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-fallback.sh <tool-name>
+# e.g. tool-fallback.sh sqlmap  ->  sqlmap | sqlninja | manual
+# e.g. tool-fallback.sh hydra   ->  hydra | medusa | ncrack | patator | none
+```
+Recognized tool names: `sqlmap`/`sqlninja` (sqli), `hydra`/`medusa`/`ncrack`/`patator`
+(password), `gobuster`/`ffuf`/`dirb`/`dirbuster`/`wfuzz` (web_enum),
+`nmap`/`masscan`/`rustscan`/`zmap` (port_scan), `enum4linux`/`smbclient`/`crackmapexec`/`smbmap`
+(smb_enum), `msfconsole` (exploit). An unrecognized name is still checked
+against `$PATH` and returns `none` if not found.
+
+Category mode - resolves a tool category to a ready-to-run fallback command
+line for a given target:
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-fallback.sh get <tool_type> <target> [port]
+# tool_type: port_scan | web_enum | smb_enum | sqli | password
+```
+
+### List All Detected Tools
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/tool-management/scripts/tool-fallback.sh list
 ```
 
 ## Integration Notes

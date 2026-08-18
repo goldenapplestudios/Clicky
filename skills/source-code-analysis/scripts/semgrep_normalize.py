@@ -28,10 +28,23 @@ skills/source-code-analysis/SKILL.md):
     during testing - reading the line ourselves, the same way
     source_taint_scan.py already does, is more reliable and has no such
     dependency).
-  - This ruleset uses simple pattern matching, not `mode: taint` dataflow
-    rules, so there's no separately-tracked taint-source line the way
+  - Most of this ruleset is simple pattern matching (`mode: search`, the
+    default), which has no separately-tracked taint-source line the way
     source_taint_scan.py's backward-window search produces one -
     `source_of_taint` says so honestly rather than fabricating a location.
+    A subset of rules (id ends in `-taint`) use `mode: taint`: real
+    intraprocedural dataflow analysis - matched only when semgrep confirms
+    a `pattern-sources` value actually reaches a `pattern-sinks` call, not
+    mere proximity. Those findings get `confidence: "high"` unconditionally
+    and an additive `taint_traced: true` field. Semgrep's granular
+    `extra.dataflow_trace` (which would carry a separately-tracked
+    intermediate-variable file:line) is gated behind Semgrep Pro and was
+    confirmed absent from this project's OSS engine output during
+    verification, with and without `--dataflow-traces` - see
+    `extract_dataflow_trace()` below, which returns `None` rather than
+    fabricating one when it's missing, and `is_taint_finding()`/the
+    three-way branch in `main()` for how the honest message differs from
+    the plain-pattern disclaimer in that (expected, common) case.
 """
 import argparse
 import json
@@ -86,6 +99,30 @@ def classify_secret(check_id):
 
 def confidence_from_severity(severity):
     return "high" if (severity or "").upper() == "ERROR" else "low"
+
+
+def is_taint_finding(check_id):
+    # Substring match, not exact/suffix match on the raw id - semgrep
+    # prefixes the id with the config file's path when loaded locally
+    # (e.g. "skills.source-code-analysis.references.clicky-sql-injection-
+    # python-taint"), the same reason `classify()` above uses substring
+    # match rather than a stricter comparison. Confirmed live against the
+    # bundled ruleset during verification.
+    return "-taint" in (check_id or "")
+
+
+def extract_dataflow_trace(extra):
+    # Reads semgrep's `extra.dataflow_trace`, which would carry a
+    # separately-tracked intermediate-variable source file:line for a
+    # `mode: taint` finding. Returns None when absent rather than
+    # fabricating a location - confirmed to be the expected case for the
+    # OSS engine this project deliberately uses (Pro-only field; verified
+    # absent from this project's semgrep 1.159.0 output both with and
+    # without `--dataflow-traces` passed to the semgrep invocation).
+    trace = (extra or {}).get("dataflow_trace")
+    if not trace:
+        return None
+    return trace
 
 
 def read_line(path, line_no):
@@ -147,22 +184,56 @@ def main():
                 "raw_rule_id": check_id,
             })
         else:
-            findings.append({
+            finding = {
                 "id": f"src-{next_id}",
                 "type": type_,
                 "file": rel_path,
                 "line": line,
                 "sink": read_line(abs_path, line),
-                "source_of_taint": (
+                "confidence": confidence,
+                "suggested_attack_vector": {"technique": type_},
+                "mitre_attack": MITRE_BY_TYPE.get(type_, []),
+            }
+
+            if is_taint_finding(check_id):
+                # A traced flow is stronger evidence than severity alone -
+                # unconditional "high", regardless of the rule's static
+                # `severity:`.
+                finding["confidence"] = "high"
+                finding["taint_traced"] = True
+                trace = extract_dataflow_trace(extra)
+                if trace is not None:
+                    # Rare, Pro-only case: a real separately-tracked
+                    # intermediate-variable source file:line.
+                    finding["source_of_taint"] = (
+                        f"traced via semgrep dataflow_trace: {trace}"
+                    )
+                else:
+                    # Expected OSS-engine case (confirmed live during this
+                    # ruleset's verification, both with and without
+                    # `--dataflow-traces`): the flow itself is genuinely
+                    # traced - `pattern-sources` was confirmed to reach
+                    # `pattern-sinks` through the function's dataflow, not
+                    # mere proximity - but the granular intermediate-
+                    # variable trace requires Semgrep Pro and isn't
+                    # available in this deployment.
+                    finding["source_of_taint"] = (
+                        "traced via semgrep `mode: taint` dataflow analysis - "
+                        "source pattern confirmed to reach this sink through "
+                        "the function's data flow; the granular intermediate-"
+                        "variable trace requires Semgrep Pro and isn't "
+                        "available in this deployment, but this is a real "
+                        "traced flow, not proximity matching"
+                    )
+            else:
+                finding["source_of_taint"] = (
                     "matched via semgrep pattern match, not a separately-tracked "
                     "line - this ruleset uses pattern matching, not taint-mode "
                     "dataflow rules, so source and sink are the same matched "
                     "expression (see 'sink')"
-                ),
-                "confidence": confidence,
-                "suggested_attack_vector": {"technique": type_},
-                "mitre_attack": MITRE_BY_TYPE.get(type_, []),
-            })
+                )
+
+            findings.append(finding)
         next_id += 1
 
     files_scanned = len((data.get("paths") or {}).get("scanned", []))

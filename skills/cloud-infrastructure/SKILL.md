@@ -22,6 +22,35 @@ scripts/cloud-detection.sh "{target}"
 # GCP: *.googleapis.com, *.googleusercontent.com
 ```
 
+## Infrastructure-as-Code Exposure
+
+`scripts/cloud-detection.sh` also runs three IaC/CI-CD checks as part of its normal report (`generate_cloud_report()`, under the `=== Infrastructure-as-Code / CI-CD Exposure ===` heading) - no separate invocation needed beyond the same `cloud-detection.sh "{target}"` call already shown above:
+
+### Terraform state exposure
+`check_terraform_state_exposure()` reuses the same candidate-bucket-name guessing as the S3/Azure storage checks (`www`, `data`, `backup`, `logs`, `assets`, `static`, `uploads`, `files`, `documents`, `media`) against common `.tfstate`/`.tfstate.backup` object paths on both S3 and the Azure Blob equivalent. A hit is only reported once the response body contains a `"terraform_version"` key - confirming it's genuinely Terraform state, not just an HTTP 200 from some other object - then graded CRITICAL if the body also contains a visible secret shape (AWS access key, PEM private key header, inline `password`/`secret_key` JSON field). Terraform state routinely embeds plaintext resource secrets inline, so an exposed state file is close to an automatic CRITICAL finding.
+
+```bash
+# Exercised automatically by generate_cloud_report(); callable directly too:
+check_terraform_state_exposure "{domain}"
+```
+
+### CI/CD config exposure
+`check_cicd_config_exposure()` probes the target's own web root for `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`, and `.circleci/config.yml` - the same exposed-deployment-artifact class as an exposed `.git` directory, since these files routinely embed API tokens and deploy keys directly in `env:`/`with:` blocks. Takes an optional second argument, a `org/repo` slug already discovered via `osint-gathering`, to also raw-fetch that repo's CI config from github.com/gitlab.com - a convenience pass against an already-in-scope repo, never a second discovery mechanism.
+
+```bash
+check_cicd_config_exposure "{domain}"
+check_cicd_config_exposure "{domain}" "{org/repo}"   # optional, already-in-scope repo only
+```
+
+### Ansible vault exposure
+`check_ansible_vault_exposure()` is intentionally narrow and explicitly low-yield in black-box testing: it checks only `/ansible/`, `/inventory.ini`, `/group_vars/all/vault.yml`, and `/.vault_pass`, confirming a real hit via the `$ANSIBLE_VAULT` header in the response body. A vault file is primarily a white-box concern - `skills/source-code-analysis/scripts/source_taint_scan.py` scans a checked-out source tree for these directly - since a vault file has no meaningful black-box network presence unless the target is inadvertently serving its own deployment tree.
+
+```bash
+check_ansible_vault_exposure "{domain}"
+```
+
+Any credential these checks surface and log through the MCP gateway comes back already tokenized - `skills/mcp-gateway/token_store.py` recognizes GitHub PATs (`ghp_`/`github_pat_` prefix), GitLab PATs (`glpat-` prefix), and Terraform Cloud/Enterprise API tokens (`atlasv1.` prefix) alongside the AWS-key/PEM-key shapes it already covered.
+
 ## AWS (Amazon Web Services)
 
 ### AWS Reconnaissance
@@ -496,12 +525,16 @@ prowler aws --checks-file checks.txt
 4. Create access keys
 5. Modify trust relationships
 
-### Defense Evasion
+### Stealth
+*(MITRE ATT&CK v19, April 2026, split the former "Defense Evasion" tactic in two: Stealth keeps the original TA0005 ID and covers blending in/avoiding detection; actively disabling or tampering with defenses is now its own Defense Impairment tactic, TA0112 - see below.)*
 1. Use built-in cloud services
 2. Blend with normal API calls
-3. CloudTrail/Log tampering
-4. Use temporary credentials
-5. API call distribution across regions
+3. Use temporary credentials
+4. API call distribution across regions
+
+### Defense Impairment
+*(New tactic, TA0112, split from "Defense Evasion" in MITRE ATT&CK v19 - actively breaking or disabling defenses rather than just blending in.)*
+1. CloudTrail/Log tampering
 
 ## Best Practices
 

@@ -12,6 +12,24 @@
 # `id` is deliberately namespaced `clicky-<type>-<lang>-...` so
 # semgrep_normalize.py can substring-match it back to source_taint_scan.py's
 # `type` vocabulary without guessing.
+#
+# Most rules below are plain `mode: search` pattern matches (the default -
+# real syntax matching, but no cross-variable dataflow tracking). Rules
+# whose id ends in `-taint` are `mode: taint`: genuine intraprocedural
+# dataflow analysis (does tainted data from a real source - an HTTP
+# request/superglobal - actually reach a dangerous sink, through
+# reassignment, not just proximity?), a free/unconditional capability of
+# the OSS Semgrep engine (`pattern-sources`/`pattern-sinks` need no Pro
+# license). What Pro *does* gate is the granular `extra.dataflow_trace`
+# field that would carry a separately-tracked intermediate-variable
+# file:line - confirmed absent from this project's semgrep 1.159.0 OSS
+# output both with and without `--dataflow-traces` during verification -
+# see semgrep_normalize.py's `extract_dataflow_trace()` and its honest
+# fallback message when that field isn't there. `-taint` is a plain
+# substring suffix (not a separate namespace segment), so
+# semgrep_normalize.py's existing substring-match `classify()` still maps
+# a taint rule's id to the same `type` vocabulary as its plain-pattern
+# counterpart without any changes to that table.
 
 rules:
   # --- sql_injection ---
@@ -76,6 +94,81 @@ rules:
       - pattern-either:
           - pattern: $STMT.executeQuery("..." + $X)
           - pattern: $STMT.execute("..." + $X)
+
+  # --- sql_injection (taint mode - real dataflow, not just syntax
+  # co-occurrence; see semgrep_normalize.py's is_taint_finding()/
+  # extract_dataflow_trace() and the "-taint" id-suffix convention noted
+  # in the header comment above) ---
+  - id: clicky-sql-injection-python-taint
+    languages: [python]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from an HTTP request reaches a SQL query without
+      parameterization - traced via Semgrep's dataflow engine, not just
+      pattern co-occurrence.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: request.args[...]
+      - pattern: request.form[...]
+      - pattern: request.GET[...]
+      - pattern: request.POST[...]
+      - pattern: request.data
+      - pattern: request.json
+    pattern-sinks:
+      - pattern: $CUR.execute(...)
+      - pattern: $CONN.execute(...)
+    pattern-sanitizers:
+      - pattern: escape(...)
+
+  - id: clicky-sql-injection-js-taint
+    languages: [javascript, typescript]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from an HTTP request reaches a SQL query without
+      parameterization - traced via Semgrep's dataflow engine, not just
+      pattern co-occurrence.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: req.query
+      - pattern: req.body
+      - pattern: req.params
+      - pattern: req.query.$X
+      - pattern: req.body.$X
+      - pattern: req.params.$X
+    pattern-sinks:
+      - pattern: $DB.query(...)
+      - pattern: $DB.execute(...)
+    pattern-sanitizers:
+      - pattern: escape(...)
+
+  - id: clicky-sql-injection-php-taint
+    languages: [php]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from a PHP superglobal reaches a SQL query without
+      parameterization - traced via Semgrep's dataflow engine, not just
+      pattern co-occurrence.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_COOKIE[...]
+    pattern-sinks:
+      - pattern: $CONN->query(...)
+      - pattern: mysqli_query($CONN, ...)
+    pattern-sanitizers:
+      - pattern: mysqli_real_escape_string(...)
+      - pattern: addslashes(...)
 
   # --- command_injection ---
   - id: clicky-command-injection-python
@@ -145,6 +238,85 @@ rules:
     patterns:
       - pattern: exec.Command($X, ...)
 
+  # --- command_injection (taint mode) ---
+  - id: clicky-command-injection-python-taint
+    languages: [python]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from an HTTP request reaches a shell/subprocess call -
+      traced via Semgrep's dataflow engine, not just pattern co-occurrence.
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: request.args[...]
+      - pattern: request.form[...]
+      - pattern: request.GET[...]
+      - pattern: request.POST[...]
+      - pattern: request.data
+      - pattern: request.json
+    pattern-sinks:
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: subprocess.call(..., shell=True, ...)
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: subprocess.check_output(..., shell=True, ...)
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+
+  - id: clicky-command-injection-js-taint
+    languages: [javascript, typescript]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from an HTTP request reaches a child_process exec call -
+      traced via Semgrep's dataflow engine, not just pattern co-occurrence.
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: req.query
+      - pattern: req.body
+      - pattern: req.params
+      - pattern: req.query.$X
+      - pattern: req.body.$X
+      - pattern: req.params.$X
+    pattern-sinks:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: exec(...)
+      - pattern: execSync(...)
+    pattern-sanitizers:
+      - pattern: escapeShellArg(...)
+
+  - id: clicky-command-injection-php-taint
+    languages: [php]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from a PHP superglobal reaches a shell-execution
+      function - traced via Semgrep's dataflow engine, not just pattern
+      co-occurrence.
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_COOKIE[...]
+    pattern-sinks:
+      - pattern: shell_exec(...)
+      - pattern: exec(...)
+      - pattern: system(...)
+      - pattern: popen(...)
+      - pattern: passthru(...)
+    pattern-sanitizers:
+      - pattern: escapeshellarg(...)
+      - pattern: escapeshellcmd(...)
+
   # --- code_injection ---
   - id: clicky-code-injection-python
     languages: [python]
@@ -183,6 +355,29 @@ rules:
       owasp: "A08:2021 - Software and Data Integrity Failures"
     patterns:
       - pattern: unserialize($X)
+
+  # --- code_injection (taint mode) ---
+  - id: clicky-code-injection-php-taint
+    languages: [php]
+    mode: taint
+    severity: ERROR
+    message: >-
+      Tainted data from a PHP superglobal reaches unserialize() - traced
+      via Semgrep's dataflow engine, not just pattern co-occurrence. PHP
+      object injection / remote code execution risk if a gadget chain is
+      reachable.
+    metadata:
+      cwe: "CWE-502"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_COOKIE[...]
+    pattern-sinks:
+      - pattern: unserialize(...)
+    pattern-sanitizers:
+      - pattern: json_decode(...)
 
   # --- xss ---
   - id: clicky-xss-js-dom

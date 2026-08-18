@@ -130,8 +130,18 @@ scan() {
         local semgrep_out semgrep_err
         semgrep_out=$(mktemp)
         semgrep_err=$(mktemp)
+        # --dataflow-traces asks semgrep to populate extra.dataflow_trace
+        # (a separately-tracked intermediate-variable file:line) on
+        # mode: taint findings. Defensive, not load-bearing: that field is
+        # gated behind Semgrep Pro Engine and is absent from this
+        # project's OSS-engine output regardless of this flag (confirmed
+        # live against semgrep 1.159.0 during this ruleset's
+        # verification) - semgrep_normalize.py's extract_dataflow_trace()
+        # already handles its absence honestly. Harmless to pass either
+        # way in case a future maintainer runs this against a Pro-enabled
+        # engine.
         semgrep --config "$script_dir/../references/semgrep-ruleset.yml" \
-            --json --quiet "$dir" > "$semgrep_out" 2>"$semgrep_err"
+            --json --quiet --dataflow-traces "$dir" > "$semgrep_out" 2>"$semgrep_err"
         if [ -s "$semgrep_out" ] && python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$semgrep_out" 2>/dev/null; then
             result=$(python3 "$script_dir/semgrep_normalize.py" "$semgrep_out" --source-dir "$dir")
         else
