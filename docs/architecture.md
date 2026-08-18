@@ -308,23 +308,25 @@ sequenceDiagram
     end
 ```
 
-### Agent Models and Why
+### Agent Models: What's Actually Configurable
 
-| Agent | Model | Temperature | Why This Choice? |
-|-------|-------|-------------|------------------|
-| Orchestrator | Sonnet 4.5 | N/A | Complex reasoning, coordinates everything |
-| Recon | Haiku | 0.3 | Fast, structured output, low creativity needed |
-| Decision | Sonnet | 0.4 | Strategic analysis requires reasoning |
-| Exploit | Haiku | 0.2 | Precise execution, minimal creativity |
-| Privesc | Haiku | 0.3 | Methodical checking, deterministic |
-| Loot | Haiku | 0.2 | Systematic extraction, precision |
-| Cloud | Haiku | 0.3 | Fast enumeration, structured output |
+Every one of the 8 real agent files sets `model: inherit` in its frontmatter (verify with `grep -n "^model:" agents/*.md`) - there is no per-agent model selection anywhere in this repo. Each agent runs on whatever model the invoking Claude Code session (the orchestrator) is already using. There is also no `temperature:` field in Claude Code's subagent frontmatter schema at all - it was never a real capability here.
 
-**Temperature explained:**
+This section used to assert specific models (Haiku/Sonnet) and specific temperature values per agent. Those numbers had no implementation behind them - Claude Code subagents don't carry a temperature knob, and none of these agents pin a model - so they've been removed rather than reintroduced, consistent with the [`userConfig`](#configuration-via-userconfig) section's policy of not documenting settings nothing in this repo actually reads.
 
-- **0.0-0.3**: Very deterministic. Given the same input, you'll get nearly the same output. Good for precise tasks.
-- **0.4-0.6**: Balanced. Some creativity while staying focused.
-- **0.7-1.0**: Creative. More variation in responses. Not used here because we want reliable, repeatable attacks.
+What *is* real, and still useful for reading each agent's output, is how deterministic its task is - not because a model or temperature setting makes it so, but because of what the task itself demands:
+
+| Agent | Task Character | Why |
+|-------|----------------|-----|
+| Recon | Structured, low-judgment | Parses tool output into a fixed JSON shape; little room for interpretation |
+| Decision | Strategic | Weighs multiple services/vectors against calibrated success rates and prior findings |
+| Exploit | Structured, precise | Follows known attack patterns keyed to a specific service/vulnerability class |
+| Privesc | Structured, methodical | Works down a fixed priority list of escalation vectors |
+| Loot | Structured, systematic | Extraction and cataloguing against a known set of target locations |
+| Cloud Recon | Structured, low-judgment | Same shape as Recon, applied to cloud provider APIs |
+| Source Analyzer | Structured, precise | Static-analysis output mapped to a fixed schema |
+
+None of this is enforced by a model or temperature setting - `model: inherit` means all 8 agents share whatever model the orchestrator is running under.
 
 ### Directory Structure Explained
 

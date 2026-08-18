@@ -15,7 +15,8 @@
 7. [Cloud Recon Agent](#cloud-recon-agent)
 8. [Source Analyzer Agent](#source-analyzer-agent)
 9. [Verification Agent](#verification-agent)
-10. [Agent Interaction Patterns](#agent-interaction-patterns)
+10. [Report Agent](#report-agent)
+11. [Agent Interaction Patterns](#agent-interaction-patterns)
 
 ---
 
@@ -82,6 +83,10 @@ flowchart LR
         VERIFY["Verification Agent"]
     end
 
+    subgraph Reporting["Phase 7: Reporting"]
+        REPORT["Report Agent"]
+    end
+
     SRC --> DECISION
     RECON --> DECISION
     CLOUD --> DECISION
@@ -93,6 +98,7 @@ flowchart LR
     PRIVESC --> VERIFY
     LOOT --> VERIFY
     CLOUD --> VERIFY
+    VERIFY --> REPORT
 ```
 
 ---
@@ -626,7 +632,7 @@ flowchart LR
     end
 
     subgraph Upgrade["Upgrade Process"]
-        S1["python -c 'import pty;<br/>pty.spawn(\"/bin/bash\")'"]
+        S1["python -c 'import pty;<br/>pty.spawn('/bin/bash')'"]
         S2["Ctrl+Z (background)"]
         S3["stty raw -echo; fg"]
         S4["export TERM=xterm"]
@@ -894,6 +900,10 @@ sequenceDiagram
     "method": "sudo_vim_escape"
   },
 
+  "credentials_found": [
+    {"username": "root", "hash": "$6$xyz...", "hash_type": "sha512crypt"}
+  ],
+
   "escalation_path": [
     {
       "step": 1,
@@ -1040,7 +1050,7 @@ sequenceDiagram
     L->>DB: SHOW DATABASES;
     DB-->>L: information_schema, mysql, app
 
-    L->>DB: USE app; SHOW TABLES;
+    L->>DB: USE app, SHOW TABLES;
     DB-->>L: users, orders, payments
 
     L->>DB: SELECT * FROM users;
@@ -1226,14 +1236,50 @@ flowchart LR
         RAW --> REATTEMPT --> VERDICT
     end
 
-    T2 --> REPORT["report-generator.sh:<br/>Confirmed Findings vs.<br/>Unverified / Needs Manual Review"]
+    T2 --> REPORT["Report Agent invokes<br/>report-generator.sh:<br/>Confirmed Findings vs.<br/>Unverified / Needs Manual Review"]
 ```
 
-It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to `Bash, Read, Grep` - no `Write`, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
+It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to the gateway's `execute_command`, `read_file`, and `search_files` - no write/register/fetch capability, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
 
 ### Why `inconclusive` Is a Real Answer
 
 The agent is explicitly instructed not to default to `confirmed` when in doubt: if a re-attempt isn't safe (destructive, non-idempotent, or access has since been lost), it says so rather than guessing. Any CRITICAL/HIGH finding that comes back `refuted`, or that Tier 1 flagged as `fail`, is a hard gate in `report-generator.sh validate` - it cannot appear in the report's "Confirmed Findings" section.
+
+---
+
+## Report Agent
+
+### Purpose
+
+Every finding that survives Tier 1/Tier 2 validation still has to become an actual client-facing deliverable - CVSS scores, OWASP/CIS/NIST framework mapping, a risk matrix, and a narrative a non-technical stakeholder can act on. Before this agent existed, that compilation happened inside the same orchestrator context that had just spent an entire engagement issuing exploitation commands and tracking credentials and attack-chain state - `commands/pentest.md` Step 10 ran `report-generator.sh` directly and then wrote the framework-mapping narrative itself. The Report Agent gives reporting the same treatment the Verification Agent already gave finding review: a fresh, single-purpose context whose only job is turning already-finalized session data into a report, with no operational history to bias phrasing or tempt it into re-litigating a finding that was already settled upstream.
+
+### From Validated Findings to a Delivered Report
+
+```mermaid
+flowchart TD
+    DISPATCH["Orchestrator Task-dispatches<br/>report-agent with $SESSION_ID,<br/>$SESSION_DIR, format, interop flag"] --> VALIDATE
+
+    subgraph ReportAgent["Report Agent"]
+        VALIDATE["execute_command:<br/>report-generator.sh validate<br/>--session-id $SESSION_ID"]
+        VALIDATE -->|FAIL| SURFACE["Surface exactly which findings<br/>failed and why - stop, no Task<br/>tool to retry or override"]
+        VALIDATE -->|PASS| GENERATE["execute_command:<br/>report-generator.sh generate<br/>--format ... --output final_report.md"]
+        GENERATE --> INTEROP{"Interop exports<br/>requested?"}
+        INTEROP -->|yes| CONVERT["execute_command:<br/>interop-formats.sh sarif /<br/>sbom-partial / aibom-partial"]
+        INTEROP -->|no| NARRATIVE
+        CONVERT --> NARRATIVE["Compile CVSS/OWASP/CIS/NIST<br/>narrative, write_file back<br/>into final_report.md"]
+    end
+
+    SURFACE --> RESULT1["Return to Orchestrator:<br/>FAIL + failing finding IDs"]
+    NARRATIVE --> RESULT2["Return to Orchestrator:<br/>report path + short summary"]
+```
+
+### Why It Can't Re-Judge Findings
+
+The Report Agent has no `Task` tool and is never given raw trace evidence the way the Verification Agent is - only `findings.json`, already carrying each finding's `validation.tier1_trace_check`/`tier2_review` verdicts. If `report-generator.sh validate` reports a FAIL (a CRITICAL/HIGH finding that failed Tier 1 or was refuted by Tier 2), the agent surfaces exactly which findings and why, and stops - it cannot retry, override, or promote a refuted finding into "Confirmed Findings" itself. That gate lives in `report-generator.sh`'s own structural check, not in this agent's judgment, so there's no path for it to talk itself past a FAIL.
+
+### Scope Boundary
+
+The Report Agent wires into `commands/pentest.md` only. `workflows/pentest-parallel.js`'s dynamic-workflow stages have no confirmed mechanism to reference an `agents/*.md` file by name - its own `verification` stage already works around this by inlining a condensed charter rather than dispatching `verification-agent` via `Task`, and its reporting stage follows that same pre-existing pattern. That's a constraint of the parallel workflow engine, not something this agent changes.
 
 ---
 

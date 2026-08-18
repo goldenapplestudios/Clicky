@@ -37,7 +37,7 @@ export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 export OTEL_TRACES_EXPORTER=otlp
 ```
 
-When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
+When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`, `source-analyzer-agent`, `verification-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
 
 ## Which one should I use?
 

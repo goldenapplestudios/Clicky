@@ -8,14 +8,14 @@ An earlier comparison covered only two commercial startups (XBOW, RunSybil). Tha
 
 ## Commercial platforms
 
-| | XBOW | RunSybil (Sybil) |
-|---|---|---|
-| Model | Hosted SaaS, "Pentest On-Demand" (~$6K, ~5 business days) | Hosted SaaS, continuous re-testing on every deploy |
-| Architecture | Coordinator + sandbox + validation agents, Docker-isolated; discovery and validation are separate systems | Single agent reasoning across app/infra layers |
-| Track record | **#1 on HackerOne's US leaderboard** (Aug 2025); disclosed CVE-2026-32194/32191 (Bing RCE, CVSS 9.8); 1,100+ vulns found; 80/104 on the public XBOW Benchmark | Founded by OpenAI's first security hire + ex-Meta red-team lead; clients incl. Cursor, Turbopuffer, Baseten, Fortune 500 (per public claims) |
-| Funding | $120M Series C, >$1B valuation (DFJ Growth, Northzone, Sequoia et al.) | $40M raise (Khosla Ventures, Anthropic's Anthology Fund, Menlo) |
+| | XBOW | RunSybil (Sybil) | Horizon3.ai (NodeZero) |
+|---|---|---|---|
+| Model | Hosted SaaS, "Pentest On-Demand" (~$6K, ~5 business days) | Hosted SaaS, continuous re-testing on every deploy | Hosted SaaS, "production-safe" autonomous pentesting; expanded to web apps in July 2026 |
+| Architecture | Coordinator + sandbox + validation agents, Docker-isolated; discovery and validation are separate systems | Single agent reasoning across app/infra layers | Chains app-layer bugs → credential theft → lateral movement → cloud pivots → business impact in a single autonomous run |
+| Track record | **#1 on HackerOne's US leaderboard** (Aug 2025); disclosed CVE-2026-32194/32191 (Bing RCE, CVSS 9.8); 1,100+ vulns found; 80/104 on the public XBOW Benchmark | Founded by OpenAI's first security hire + ex-Meta red-team lead; clients incl. Cursor, Turbopuffer, Baseten, Fortune 500 (per public claims) | 6,436 customers, 262K+ pentests run (per public claims); showcased at Black Hat USA 2026 |
+| Funding | $120M Series C, >$1B valuation (DFJ Growth, Northzone, Sequoia et al.) | $40M raise (Khosla Ventures, Anthropic's Anthology Fund, Menlo) | - |
 
-Sources: [XBOW Series C](https://xbow.com/news/xbow-raises-120m-to-scale), [XBOW HackerOne #1](https://xbow.com/blog/top-1-how-xbow-did-it), [XBOW Bing RCE](https://tech-insider.org/xbow-ai-hacker-bing-rce-2026/), [XBOW Pentest On-Demand](https://www.businesswire.com/news/home/20251112470912/en/Announcing-XBOW-Pentest-On-Demand-for-Security-at-Machine-Speed), [XBOW Benchmark repo](https://github.com/xbow-engineering/validation-benchmarks), [RunSybil $40M raise](https://siliconangle.com/2026/03/18/runsybil-raises-40m-automate-offensive-security-ai-agents/), [RunSybil site](https://www.runsybil.com/).
+Sources: [XBOW Series C](https://xbow.com/news/xbow-raises-120m-to-scale), [XBOW HackerOne #1](https://xbow.com/blog/top-1-how-xbow-did-it), [XBOW Bing RCE](https://tech-insider.org/xbow-ai-hacker-bing-rce-2026/), [XBOW Pentest On-Demand](https://www.businesswire.com/news/home/20251112470912/en/Announcing-XBOW-Pentest-On-Demand-for-Security-at-Machine-Speed), [XBOW Benchmark repo](https://github.com/xbow-engineering/validation-benchmarks), [RunSybil $40M raise](https://siliconangle.com/2026/03/18/runsybil-raises-40m-automate-offensive-security-ai-agents/), [RunSybil site](https://www.runsybil.com/), [Horizon3.ai NodeZero](https://www.horizon3.ai/).
 
 ## Open-source and academic frameworks
 
@@ -52,16 +52,16 @@ Sources for this section: see the per-project links inline above, plus [hackingB
 
 | Benchmark | Measures | Scale | Key result |
 |---|---|---|---|
-| [XBOW Validation Benchmarks](https://github.com/xbow-engineering/validation-benchmarks) | End-to-end exploit proof, Docker web-vuln challenges | 104 challenges | XBOW: 80/104 |
+| [XBOW Validation Benchmarks](https://github.com/xbow-engineering/validation-benchmarks) | End-to-end exploit proof, Docker web-vuln challenges | 104 challenges | XBOW: 80/104. **Currency note (as of mid-2026): this benchmark is now considered saturated** - frontier frameworks cluster around ~100%, so it's lost most of its power to discriminate between competing tools. The 80/104 figure itself still stands; treat it as historical rather than a live differentiator. |
 | [AutoPenBench](https://github.com/lucagioacchini/auto-pen-bench) | 22 in-vitro + 11 real-CVE tasks | 33 tasks | **Assisted 64% vs. fully autonomous 21%** - human-in-the-loop roughly triples success over full autonomy |
 | [Cybench](https://github.com/andyzorigin/cybench) | 40 professional CTF tasks, pass@k, capped budget | 40 | CAI claims pass@3 lead (self-reported) |
 | [CVE-Bench](https://github.com/uiuc-kang-lab/cve-bench) (ICML'25 Spotlight) | Real exploitation of 40 critical CVEs, realistic deployments | 40 CVEs | Best agent framework: **13%** success |
-| [CyberGym](https://arxiv.org/abs/2506.02548) (UC Berkeley) | Reproduce real vulnerabilities from description + codebase | 1,507 vulns, 188 projects | Best combos ~20% success; running the benchmark itself found 34 new zero-days |
+| [CyberGym](https://arxiv.org/abs/2506.02548) (UC Berkeley) | Reproduce real vulnerabilities from description + codebase | 1,507 vulns, 188 projects | Best combos ~20% success; running the benchmark itself found 34 new zero-days. **Currency note (Aug 2026): the creators' independently-verified ~20% figure is still current**, but a new public leaderboard, [BenchLM.ai](https://benchlm.ai/), now shows vendor-reported scores of 84-87% (e.g. Sakana AI's Fugu-Cyber, GPT-5.6 Sol, GLM-5.3) - these are explicitly disputed as unverified, with no disclosed methodology. A live, current example of exactly the near-100%-vendor-claim skepticism this document argues for below. |
 | [PentestEval](https://arxiv.org/abs/2512.14233) | Stage-decomposed (PTES/NIST-aligned), expert-annotated | 346 tasks, 12 scenarios | **31% end-to-end success; "autonomous agents fail almost entirely" on full pipelines** even though individual stages score better in isolation - PentestGPT, PentestAgent, VulnBot all show the same pattern |
 | [Fang et al.](https://arxiv.org/abs/2402.06664) "LLM Agents can Autonomously Hack Websites" | GPT-4 exploiting known CVEs, with/without advisory text | - | **87% with advisory text, 7% without** - the clearest evidence of pattern-matching known writeups rather than novel reasoning |
 | NYU CTF Bench, InterCode-CTF | CSAW/picoCTF challenges | 200 / 100 | Used as comparison baselines in several studies; InterCode-CTF's repo is stale (last push 2024-05) |
 
-**Pattern across every credible, independently-run benchmark**: a steep "lab vs. reality" cliff (64%→21%, 87%→7%, 31% end-to-end, 13% on CVE-Bench, ~20% on CyberGym). Treat any vendor claiming near-100% on a named benchmark as a claim to verify, not accept - check whether it's the full untouched benchmark or a "cleaned"/curated subset (see Shannon above).
+**Pattern across every credible, independently-run benchmark**: a steep "lab vs. reality" cliff (64%→21%, 87%→7%, 31% end-to-end, 13% on CVE-Bench, ~20% on CyberGym). Treat any vendor claiming near-100% on a named benchmark as a claim to verify, not accept - check whether it's the full untouched benchmark or a "cleaned"/curated subset (see Shannon above), or an unverified leaderboard entry with undisclosed methodology (see the CyberGym/BenchLM.ai currency note above - 84-87% vendor-reported vs. the creators' verified ~20%).
 
 ## What "feature-complete" means in this category
 
@@ -85,7 +85,7 @@ A genuinely complete framework in this category consistently needs:
 
 A third meta-analysis, ["Recognition Without Mitigation"](https://arxiv.org/abs/2506.08693) (Happe & Cito, TU Wien - same lab as hackingBuddyGPT/cochise), audited ethics practices across offensive-LLM-agent papers: only **39%** even acknowledge dual-use risk, only **7%** propose concrete mitigations, only **2%** underwent institutional review, only **6%** describe responsible-disclosure processes, and **17%** actively document defeating model safety guardrails without proposing countermeasures. 94% have research-integrity safeguards (sandboxes, human-in-the-loop) that protect the experiment, not the public, from misuse.
 
-Clicky's `scope-enforcement-hook.sh` (a real, fail-closed-within-session PreToolUse hook checked against every Bash/WebFetch call, with `commands/pentest.md` auto-generating a `scope.json` if the operator doesn't supply one) is already ahead of most of this field on that specific axis - worth stating plainly rather than just disclaiming.
+Clicky's scope-enforcement infrastructure - `scope-validator.sh`'s real CIDR/IP-range/wildcard-domain matching against `scope.json`, checked automatically by `skills/mcp-gateway`'s `register_target` tool (configurable `enforce`/`warn`/`off`, fail-open only on genuine internal errors, never on an explicit out-of-scope decision), with `commands/pentest.md` auto-generating a `scope.json` if the operator doesn't supply one - is already ahead of most of this field on that specific axis - worth stating plainly rather than just disclaiming. (An earlier revision gated this at every Bash/WebFetch call via a `PreToolUse` hook; that hook has since been retired in favor of the gateway above, and all 9 agents plus the orchestrating `/pentest` command are now fully wired onto the gateway's 7 tools, with zero direct Bash/Read/Write/WebFetch grants left anywhere in the plugin - see `skills/target-validation/SKILL.md`'s "Automatic Scope Enforcement" section for the full account, including the one agent, `verification-agent`, that still runs an explicit scope check of its own since it deliberately doesn't hold `register_target`.)
 
 ## Honest positioning for Clicky
 

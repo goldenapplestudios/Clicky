@@ -28,6 +28,10 @@ SERVER_PID=$!
 # Poll readiness instead of a blind sleep.
 ready=0
 for _ in $(seq 1 30); do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "FAIL: mock server process (PID $SERVER_PID) died before becoming ready"
+        exit 1
+    fi
     if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/safe" -X POST -d '{}'; then
         ready=1
         break
