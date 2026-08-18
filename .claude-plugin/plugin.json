@@ -53,7 +53,7 @@
     "scope_enforcement": {
       "type": "string",
       "title": "Scope enforcement mode",
-      "description": "Controls the PreToolUse scope-enforcement hook. 'enforce' (default): deny out-of-scope targets, ask about unlisted ones. 'warn': never blocks, just logs what it would have done to the session's logs/scope-enforcement.log. 'off': disables the hook entirely. Any other value is treated as 'enforce'.",
+      "description": "Controls the strictness of the MCP gateway's (skills/mcp-gateway) scope check, run by register_target before a target is registered. 'enforce' (default): deny out-of-scope targets, ask about unlisted ones. 'warn': never blocks, just logs what it would have done to the session's logs/scope-enforcement.log. 'off': skips the scope check entirely. Any other value is treated as 'enforce'.",
       "default": "enforce",
       "required": false
     },
@@ -64,6 +64,11 @@
       "default": 5,
       "min": 1,
       "max": 100
+    }
+  },
+  "mcpServers": {
+    "clicky-gateway": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/skills/mcp-gateway/scripts/launch.sh"
     }
   }
 }

@@ -1,12 +1,11 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Bash|WebFetch",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/target-validation/scripts/scope-enforcement-hook.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/mcp-gateway/scripts/provision-venv.sh"
           }
         ]
       }
