@@ -53,6 +53,17 @@ opencode run "Recon example.com" --agent recon-agent   # or: opencode, then /pen
 
 The generated `.opencode/agents/*.md` carry the exact same "no direct tool access, gateway only" security model as the Claude Code agents - each one explicitly denies every OpenCode built-in tool (`bash`/`edit`/`write`/`read`/etc.) and allows only its specific `clicky-gateway_*` MCP tools, confirmed live against a real installed binary (see `tools/generate-cli-targets.py`'s own doc comments for the full verification record, including a real adversarial test and a real end-to-end scan).
 
+### Codex CLI
+
+Also generated for [Codex CLI](https://developers.openai.com/codex) - agents live in `.codex/agents/*.toml`, project-scoped and need no install step, but Codex's MCP-server registration and custom prompts are confirmed global-only (no project-relative equivalent Codex will discover), so run the one-time installer first:
+
+```bash
+./.codex/install.sh                                    # registers the gateway + prompts globally (safe to re-run)
+./tools/run-clicky-agent.sh "Recon example.com"         # not a bare `codex exec` - see why below
+```
+
+`run-clicky-agent.sh` pins `-m gpt-5.4` and passes `--disable shell_tool` on every invocation - both are real, live-confirmed requirements, not defaults: Codex's own default model has an open upstream bug (`openai/codex#32101`) that silently drops MCP tool exposure for some models, and Codex has no `permission: deny`-style mechanism the way OpenCode does, so `--disable shell_tool` is the confirmed-working lever for denying direct shell access while keeping gateway tools available. Both were found and fixed after an initial live test looked like a hard blocker - see `tools/generate-cli-targets.py`'s Codex section doc comment for the full story, including why containerizing wouldn't have helped (the bug is proven application-level, not environment-level) and how a real adversarial test and a real end-to-end scan against `scanme.nmap.org` confirmed the fix.
+
 ## Quick Start
 
 ```bash
