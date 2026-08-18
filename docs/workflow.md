@@ -94,8 +94,10 @@ flowchart TB
 | 3 | Exploit | 5-10 minutes | Attack attempts |
 | 4 | Privesc | 5-15 minutes | Escalate to root |
 | 5 | Loot | 3-5 minutes | Extract data |
-| 6 | Decision | 2 minutes | Generate report |
+| 6 | Report | 2 minutes | Generate report |
 | **Total** | - | **18-36 minutes** | Complete assessment |
+
+(Report generation is a dedicated `report-agent`, not the Decision Agent - it runs from a fresh, unbiased context rather than the operationally-loaded context that ran the rest of the engagement. See [Phase 6: Reporting](#phase-6-reporting) below.)
 
 ### Two Entry Points: `/pentest` vs `/pentest-parallel`
 
@@ -119,13 +121,19 @@ Default to `/clicky:pentest`. Reach for `/clicky:pentest-parallel` when you spec
 
 You can't attack what you don't know exists. Reconnaissance discovers the **attack surface** - every service running on the target that might be vulnerable.
 
+For a domain target (not a bare IP/range/CIDR), the Recon Agent now runs a **Phase 0: Attack Surface Mapping** step ahead of the port/service discovery below: subdomain discovery via a crt.sh -> Subfinder -> Amass cascade, resolution, and subdomain-takeover fingerprinting against a curated `can-i-take-over-xyz` subset (`skills/subdomain-enumeration`). Newly discovered subdomains become pivot targets in their own right, and a confirmed takeover candidate is handed opportunistically to the Exploit Agent the same way an exposed `.git` directory is. See [Skills → subdomain-enumeration](skills.md#subdomain-enumeration) and `agents/recon-agent.md`.
+
 ### Step-by-Step Process
+
+**Note on the diagram below**: it shows `R->>T` arrows directly for readability, but Recon Agent has no direct `Bash`/`WebFetch` tool in the current implementation. Every step here (`nmap`, the FTP/SMB/HTTP quick checks) is actually issued as an `execute_command`/`fetch_url` call through the Clicky MCP gateway (`skills/mcp-gateway`), which resolves the target's token to the real value immediately before running the command and redacts the target/any discovered credentials back to tokens in what's returned to the agent. See [Skills → mcp-gateway](skills.md#mcp-gateway) for the actual mechanism.
 
 ```mermaid
 sequenceDiagram
     participant O as Orchestrator
     participant R as Recon Agent
     participant T as Target
+
+    Note over O,T: Phase 0 (domain targets only): subdomain enumeration + takeover fingerprinting, omitted below for brevity - see skills/subdomain-enumeration
 
     Note over O,T: Phase 1 begins
 
@@ -394,6 +402,8 @@ flowchart LR
 ### Purpose
 
 This is where we actually **gain access** to the target. The Exploit Agent executes the attack plan, trying each priority until one succeeds.
+
+**Note on the diagrams in this phase**: the `E->>F`/`E->>W`/`S->>W` arrows below show direct agent-to-target interaction for readability, but Exploit Agent has no direct `Bash`/`WebFetch` tool in the current implementation. Every command shown (FTP login, sqlmap probes, upload requests) is actually issued as an `execute_command`/`fetch_url` call through the Clicky MCP gateway (`skills/mcp-gateway`), which resolves target tokens to real values immediately before running and redacts real values back to tokens in the result. See [Skills → mcp-gateway](skills.md#mcp-gateway).
 
 ### The Exploitation Loop
 

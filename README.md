@@ -8,7 +8,7 @@ A multi-agent penetration testing framework powered by Claude. Clicky orchestrat
 
 ## Overview
 
-Clicky combines intelligent agent orchestration with attack-priority ordering that self-calibrates from your own session history (see above). It supports traditional infrastructure, cloud environments, containers, APIs, and Active Directory.
+Clicky combines intelligent agent orchestration with attack-priority ordering that self-calibrates from your own session history (see above). It supports traditional infrastructure, cloud environments, containers, APIs, and Active Directory. Every agent reaches the target exclusively through an MCP privacy gateway that tokenizes real target/credential values before they ever reach the model (see below).
 
 ```mermaid
 flowchart LR
@@ -28,7 +28,7 @@ flowchart LR
     E -.->|failure| C
 ```
 
-Every Bash/WebFetch call in between is checked against the engagement's `scope.json` by an always-on `PreToolUse` hook (see [Sandboxing](docs/sandboxing.md) for the opt-in OS-level layer on top).
+Every agent calls the target only through the `clicky-gateway` MCP server (see [Architecture](docs/architecture.md#security-model)): its `register_target` tool checks the target against the engagement's `scope.json` automatically before minting the token an agent then uses for every subsequent `execute_command`/`fetch_url`/etc. call, replacing an earlier always-on `PreToolUse` hook (see [Sandboxing](docs/sandboxing.md) for the opt-in OS-level layer on top). The same gateway also tokenizes real target IPs/hostnames and any discovered credentials before they ever reach the model, resolving them back to real values only at actual execution time - see [Skills](docs/skills.md#mcp-gateway).
 
 ## Installation
 
@@ -116,9 +116,9 @@ Clicky/
 
 ## Core Components
 
-### Agents (8)
+### Agents (9)
 
-Agents are defined in `agents/` as markdown files with YAML frontmatter specifying model, tools, and skills.
+Agents are defined in `agents/` as markdown files with YAML frontmatter specifying model, tools, and skills. Every agent's `tools:` list is exclusively `mcp__plugin_clicky_clicky-gateway__*` gateway tools - no agent holds a direct Bash/Read/Write/Glob/Grep grant (see [Architecture](docs/architecture.md#security-model)).
 
 - **recon-agent**: Port scanning, service detection, environment fingerprinting
 - **decision-agent**: Strategic analysis, attack prioritization based on pentesting research
@@ -128,6 +128,7 @@ Agents are defined in `agents/` as markdown files with YAML frontmatter specifyi
 - **cloud-recon-agent**: AWS/Azure/GCP/Kubernetes enumeration
 - **source-analyzer-agent**: White-box source-code analysis - source-to-sink mapping and vulnerable dependencies, feeding decision-agent as a parallel input (see [Agents](docs/agents.md#source-analyzer-agent))
 - **verification-agent**: Independently re-checks CRITICAL/HIGH findings against raw trace evidence before they reach the report (see [Agents](docs/agents.md#verification-agent))
+- **report-agent**: Synthesizes already-validated session findings into the final client-facing report - CVSS/OWASP/CIS/NIST framework mapping, risk matrix, and narrative - replacing direct `report-generator.sh` invocation from the orchestrator (see [Agents](docs/agents.md#report-agent))
 
 ### Commands
 
@@ -139,9 +140,9 @@ Commands are defined in `commands/` as markdown files.
 - `/clicky:resume <session_id>` - Resume a session for further work
 - `/clicky:archive <session_id>` - Archive a completed session
 
-### Skills (24)
+### Skills (26)
 
-Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories.
+Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories. The two newest: **mcp-gateway** - the privacy/tokenization gateway architecture described above; **subdomain-enumeration** - crt.sh/Subfinder/Amass-based attack-surface mapping with takeover detection, run by recon-agent's Phase 0. See [Skills](docs/skills.md) for the full list.
 
 ## Documentation
 
@@ -169,7 +170,7 @@ See the [docs/](docs/) directory for detailed documentation:
 
 This framework is for authorized security testing only. Always obtain written permission before testing. Respect scope boundaries and avoid destructive actions.
 
-Ethical safety here is enforced structurally - the `scope-enforcement` hook and the written-authorization requirement above - not by withholding exploitation capability from `exploit-agent`. That agent's full technique coverage (SQLi, AD attacks, container/cloud escapes, API exploitation, etc.) is core, required functionality for a working pentesting tool, on par with what Metasploit or Burp Suite ship; it is in scope for this project and shouldn't be pruned. Prior scope-narrowing in this repo removed the standalone `evasion-techniques` skill (AV/EDR evasion, a different and more detection-evasion-flavored capability) - that decision doesn't extend to `exploit-agent` itself.
+Ethical safety here is enforced structurally - the MCP gateway's automatic scope check on `register_target` and the written-authorization requirement above - not by withholding exploitation capability from `exploit-agent`. That agent's full technique coverage (SQLi, AD attacks, container/cloud escapes, API exploitation, etc.) is core, required functionality for a working pentesting tool, on par with what Metasploit or Burp Suite ship; it is in scope for this project and shouldn't be pruned. Prior scope-narrowing in this repo removed the standalone `evasion-techniques` skill (AV/EDR evasion, a different and more detection-evasion-flavored capability) - that decision doesn't extend to `exploit-agent` itself.
 
 ## License
 

@@ -667,7 +667,7 @@ The `/pentest` command allows specific tools. To see what's allowed:
 allowed-tools: mcp__plugin_clicky_clicky-gateway__register_target, mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__write_file, mcp__plugin_clicky_clicky-gateway__search_files, Task, TodoWrite
 ```
 
-Neither `/pentest` nor any of the 8 agents it dispatches has a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` grant anymore - every action, including the orchestrating command's own session/scope bookkeeping, goes through the Clicky MCP gateway's tools instead (see `skills/mcp-gateway/SKILL.md`). `execute_command` is what actually runs `nmap`/`sqlmap`/`hydra`/etc. underneath, resolving `TARGET_n`-style tokens to real values first.
+Neither `/pentest` nor any of the 9 agents it dispatches has a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` grant anymore - every action, including the orchestrating command's own session/scope bookkeeping, goes through the Clicky MCP gateway's tools instead (see `skills/mcp-gateway/SKILL.md`). `execute_command` is what actually runs `nmap`/`sqlmap`/`hydra`/etc. underneath, resolving `TARGET_n`-style tokens to real values first.
 
 ### Extending Clicky
 

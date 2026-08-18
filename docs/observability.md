@@ -37,7 +37,11 @@ export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 export OTEL_TRACES_EXPORTER=otlp
 ```
 
-When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`, `source-analyzer-agent`, `verification-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
+When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`, `source-analyzer-agent`, `verification-agent`, `report-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
+
+## A note on trace-log safety
+
+All 9 agents (see [Agents](agents.md)) hold gateway-only tool grants (`mcp__plugin_clicky_clicky-gateway__*`) - none has a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` tool. The gateway tokenizes target/credential values in what it hands back before its result ever reaches the model, and the model in turn only ever sends the gateway tokenized values (e.g. `TARGET_1`) rather than raw IPs/hostnames/credentials. `trace-logger.sh` (the Tier 1 hook script) writes exactly `tool_input`/`tool_result` from the hook payload it's given - i.e. exactly what the model sent to and received from a tool call, nothing captured independently below that layer. The practical result is that Tier 1 trace logs (`~/.claude/pentest-traces/*.jsonl`) end up token-safe by construction: real target/credential values shouldn't appear in them, because the gateway redacts before the model - and therefore before the model's tool calls/results, which is what gets traced - ever sees them. This is an incidental benefit of the gateway architecture, not a separate redaction step trace-logger.sh performs itself.
 
 ## Which one should I use?
 

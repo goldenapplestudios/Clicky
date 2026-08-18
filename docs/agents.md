@@ -27,7 +27,7 @@
 A regular AI conversation is stateless - you ask a question, get an answer, done. An **agent** is an AI configured to:
 
 1. **Perform tasks autonomously**: Execute commands, read files, make decisions
-2. **Use tools**: Bash commands, file operations, network requests
+2. **Use tools**: Run commands, read/write files, make network requests - in Clicky, every one of these goes through the MCP gateway (`mcp__plugin_clicky_clicky-gateway__*` tools) rather than a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` tool; see each agent's own "Gateway Calling Convention" section (e.g. `agents/recon-agent.md`) for how that works
 3. **Follow a specialized role**: Each agent is an expert in one domain
 4. **Produce structured output**: JSON that other agents can parse
 
@@ -113,6 +113,26 @@ The Recon Agent is your **eyes and ears**. Before you can attack anything, you n
 - What services are running (what software is listening?)
 - What versions are installed (are they vulnerable?)
 - What environment is this (Linux? Windows? Cloud?)
+- What subdomains exist, for a domain target (is the attack surface bigger than the one host?)
+
+### Phase 0: Attack Surface Mapping
+
+Before any port scanning happens, the Recon Agent checks whether the target it was given is a domain name rather than a bare IP/range/CIDR (`skills/target-validation`). If it is, it maps the DNS attack surface first via `skills/subdomain-enumeration`, ahead of everything described below:
+
+```mermaid
+flowchart LR
+    START["Target given"] --> ISDOMAIN{"Domain name?<br/>(vs. bare IP/range/CIDR)"}
+    ISDOMAIN -->|No| SKIP["Skip straight to<br/>Step 1: Full port scan"]
+    ISDOMAIN -->|Yes| CASCADE["subdomain-enum.sh source cascade:<br/>crt.sh -> subfinder -> amass<br/>(passive by default)"]
+    CASCADE --> RESOLVE["Resolve every merged,<br/>deduped candidate (dig/host)"]
+    RESOLVE --> TAKEOVER{"CNAME matches a known<br/>provider + fingerprint hit?"}
+    TAKEOVER -->|Yes| FLAG["takeover_candidate_detected: true<br/>(hands the finding to Exploit Agent)"]
+    TAKEOVER -->|No| NEXT["Resolved names become new<br/>pivot targets (new tokens)"]
+    FLAG --> NEXT
+    NEXT --> STEP1["Step 1: Full port scan<br/>(for target + every pivot)"]
+```
+
+The source cascade degrades gracefully - each of the three sources (crt.sh certificate-transparency search, then `subfinder`, then `amass`) is skipped rather than treated as a failure if the tool isn't installed or returns nothing. `--active` (amass's own brute-force techniques) is only added when the engagement's rules of engagement explicitly permit it; the default is passive-only. A confirmed takeover candidate is a real, fingerprint-matched string hit on the response body, not just a CNAME pointing at a known provider - see `skills/subdomain-enumeration/SKILL.md` for the full methodology.
 
 ### How It Works
 
