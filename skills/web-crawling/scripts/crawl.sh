@@ -11,9 +11,11 @@
 # Usage: crawl.sh crawl --url <url> [--auth-file <path>] [--depth N] [--output <json>]
 #
 # Output is normalized to one shape regardless of which tool ran - check
-# "crawler_used" ("katana"/"hakrawler"/"static-fallback"/"none") before
-# trusting the completeness of the result: only "katana" can see
-# JS-rendered routes. See skills/web-crawling/SKILL.md.
+# "crawler_used" ("katana"/"hakrawler"/"static-fallback") before trusting
+# the completeness of the result: only "katana" can see JS-rendered
+# routes. static-fallback always runs (and always sets a value) whenever
+# both katana and hakrawler are unavailable or fail, so crawler_used is
+# never actually empty/"none" in practice. See skills/web-crawling/SKILL.md.
 #
 
 set -uo pipefail
@@ -50,7 +52,6 @@ crawl() {
         esac
     done
     : "${url:?--url required}"
-    require_jq_present=1
     command -v jq >/dev/null 2>&1 || { echo "ERROR: jq required" >&2; exit 1; }
 
     load_auth_args "$auth_file"
@@ -103,7 +104,7 @@ print(json.dumps(out))
     fi
 
     if [ -z "$crawler_used" ] && command -v hakrawler >/dev/null 2>&1; then
-        echo "$url" | hakrawler -d "$depth" > "$work/hakrawler.txt" 2>"$work/hakrawler.stderr" || true
+        echo "$url" | hakrawler -d "$depth" "${AUTH_ARGS[@]+${AUTH_ARGS[@]}}" > "$work/hakrawler.txt" 2>"$work/hakrawler.stderr" || true
         if [ -s "$work/hakrawler.txt" ]; then
             crawler_used="hakrawler"
             skipped_reason=""

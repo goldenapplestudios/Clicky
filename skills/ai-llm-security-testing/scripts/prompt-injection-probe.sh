@@ -44,26 +44,44 @@ load_auth_args() {
     [ -n "$auth_file" ] || return 0
     [ -f "$auth_file" ] || { echo "ERROR: auth file not found: $auth_file" >&2; exit 1; }
     local line
-    while IFS= read -r line; do
-        [ -n "$line" ] && AUTH_ARGS+=(-H "$line")
-    done < <(bash "$AUTH_CAPTURE" to-header-args --auth-file "$auth_file")
+    local auth_tmp; auth_tmp=$(mktemp)
+    if bash "$AUTH_CAPTURE" to-header-args --auth-file "$auth_file" > "$auth_tmp"; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && AUTH_ARGS+=(-H "$line")
+        done < "$auth_tmp"
+    else
+        echo "WARNING: auth-capture.sh exited non-zero (status $?) for auth file '$auth_file'; proceeding UNAUTHENTICATED" >&2
+    fi
+    rm -f "$auth_tmp"
 }
 
 probe() {
     local url="" template="$DEFAULT_TEMPLATE" payload_file="$DEFAULT_PAYLOAD_FILE" auth_file="" output=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --url) url="$2"; shift 2 ;;
-            --template) template="$2"; shift 2 ;;
-            --payload-file) payload_file="$2"; shift 2 ;;
-            --auth-file) auth_file="$2"; shift 2 ;;
-            --output) output="$2"; shift 2 ;;
-            *) shift ;;
+            --url)
+                [ $# -ge 2 ] || { echo "ERROR: --url requires a value" >&2; usage; }
+                url="$2"; shift 2 ;;
+            --template)
+                [ $# -ge 2 ] || { echo "ERROR: --template requires a value" >&2; usage; }
+                template="$2"; shift 2 ;;
+            --payload-file)
+                [ $# -ge 2 ] || { echo "ERROR: --payload-file requires a value" >&2; usage; }
+                payload_file="$2"; shift 2 ;;
+            --auth-file)
+                [ $# -ge 2 ] || { echo "ERROR: --auth-file requires a value" >&2; usage; }
+                auth_file="$2"; shift 2 ;;
+            --output)
+                [ $# -ge 2 ] || { echo "ERROR: --output requires a value" >&2; usage; }
+                output="$2"; shift 2 ;;
+            *) echo "ERROR: unrecognized flag: $1" >&2; usage ;;
         esac
     done
     : "${url:?--url required}"
     [ -f "$payload_file" ] || { echo "ERROR: payload file not found: $payload_file" >&2; exit 1; }
     command -v jq >/dev/null 2>&1 || { echo "ERROR: jq required" >&2; exit 1; }
+    command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 required" >&2; exit 1; }
+    [[ "$template" == *"{PAYLOAD}"* ]] || echo "WARNING: --template does not contain the {PAYLOAD} placeholder; substitution will be a no-op and every result will misleadingly read no_injection_detected" >&2
 
     load_auth_args "$auth_file"
 

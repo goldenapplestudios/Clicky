@@ -13,16 +13,35 @@ Ensures targets are valid, within scope, and properly identified before penetrat
 
 ### Input Validation
 ```bash
-# Validate target format and scope
+# Validate target FORMAT (IP, IP range, CIDR, or hostname) and reject a
+# small set of obviously-dangerous targets (localhost, 0.0.0.0, link-local,
+# cloud metadata addresses). Accepts a single target, or a comma-separated
+# list of targets (each validated independently).
 ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/validate-target.sh "{target}"
 
-# Returns:
-# 0 - Valid target
-# 1 - Invalid IP format
-# 2 - Private IP not in scope
-# 3 - Hostname resolution failed
-# 4 - Target in exclusion list
-# 5 - Target outside IP range
+# Returns (this is the real, current contract - see note below):
+# 0 - Valid target. Prints one of:
+#       VALID_IP: {target}        VALID_RANGE: {target}
+#       VALID_CIDR: {target}      VALID_HOSTNAME: {target}
+#     A private-IP/private-range target also prints a WARNING line first;
+#     that is informational, not a failure.
+# 1 - Invalid: bad format (prints "ERROR: Invalid target format: ..." or
+#     "ERROR: Invalid IP range format: ..."), OR a well-formed but
+#     dangerous target rejected regardless of format (localhost, 0.0.0.0,
+#     link-local, cloud metadata - prints "ERROR: Cannot scan ..."), OR -
+#     for a comma-separated list - at least one target in the list failed
+#     (the rest are still printed, but the overall exit code is 1).
+#
+# validate-target.sh only checks FORMAT and that small dangerous-IP
+# denylist. It does no DNS resolution and has no engagement scope /
+# exclusion-list logic - that is scope-validator.sh's job, a separate
+# script with its own exit-code contract; see "Scope Validation" below.
+# A hostname that resolves fine but is out of scope, or one that doesn't
+# resolve at all, still returns 0 here. (An earlier draft of this doc
+# described a single 6-code contract - 0/1/2/private-IP/3-DNS-failure/
+# 4-exclusion-list/5-outside-range - spanning both scripts; that never
+# matched either script's actual behavior and has been replaced by the
+# two contracts documented in place, above and in "Scope Validation".)
 ```
 
 ### Target Format Support
@@ -34,11 +53,21 @@ ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/validate-target.sh "{targ
 10.10.10.0/24
 10.10.10.1-254
 
-# Hostname
+# Hostname (dotted). A bare single-label hostname (e.g. "dc01", an ordinary
+# internal AD host) is also a valid validate-target.sh format. The
+# scope-enforcement extractor (scripts/extract-targets.py) recognizes bare
+# hostnames too, but conservatively: only a token containing both a letter
+# and a digit and not glued to a preceding "-"/"=" is treated as a
+# candidate target, to avoid flagging ordinary flag values/usernames/tool
+# names. A bare hostname with no digit in it (e.g. "attackbox") is a known
+# blind spot there - use a dotted or otherwise-qualified name if you need
+# the extractor to catch it reliably.
 target.example.com
 api.example.com
+dc01
 
-# Multiple targets
+# Multiple targets (validate-target.sh splits on comma and validates each
+# target independently; the whole call fails if any single one does)
 10.10.10.10,10.10.10.11,10.10.10.12
 
 # CIDR notation
@@ -181,22 +210,46 @@ ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --tech
 
 # Check time restrictions
 ${CLAUDE_PLUGIN_ROOT}/skills/target-validation/scripts/scope-validator.sh --check-time --scope scope.json
+
+# --target/--technique/--check-time can be combined in one call.
+
+# Exit codes - a separate contract from validate-target.sh's above (this
+# script does the actual scope/exclusion-list/technique/time checking;
+# validate-target.sh only checks target format):
+# 0 - every check that was requested passed:
+#       --target:      matched an in_scope entry            -> "IN SCOPE: ..."
+#       --technique:   not restricted, and (if
+#                      authorized_techniques is set) matches it -> "AUTHORIZED: ..."
+#       --check-time:  within time_window, or no time_window/
+#                      free-text time restriction is defined at all
+#                      -> "WITHIN TIME WINDOW: ..." / "No time restrictions found..."
+# 1 - any requested check failed:
+#       --target:      matched an out_of_scope entry ("OUT OF SCOPE ...")
+#                      or matched neither list ("NOT LISTED ...")
+#       --technique:   matches a free-text restriction ("RESTRICTED: ...")
+#                      or authorized_techniques is non-empty and doesn't
+#                      mention it ("NOT AUTHORIZED: ...")
+#       --check-time:  outside the configured time_window ("OUTSIDE TIME WINDOW: ...")
+#     Also returned for usage errors: missing/nonexistent --scope file,
+#     or python3 not available.
+#
+# When multiple flags are passed in one call, the exit code is 1 if ANY of
+# the requested checks failed, not just the last one evaluated - check the
+# printed lines (one per flag passed) to see which check(s) failed.
 ```
 
 ### Automatic Scope Enforcement
 
-`scope-validator.sh` above is invoked automatically for every Bash and WebFetch tool call during a session, not just when an agent remembers to call it. `commands/pentest.md` Step 1 (and `workflows/pentest-parallel.js`'s init stage) resolve a `scope.json` for the engagement - first `./scope.json` in the operator's working directory, then a `scope: <path>` key in the `/pentest` context argument, then an auto-generated single-target scope if neither is provided - and write it to `$SESSION_DIR/scope.json`.
+`scope-validator.sh` and `scripts/extract-targets.py` are still the real, live scope-matching and target-extraction logic - nothing here has been removed. What changed is *where* they're invoked from: a `PreToolUse` hook (`skills/target-validation/scripts/scope-enforcement-hook.sh`) used to run both scripts before every Bash/WebFetch tool call, for every agent, automatically. That hook has since been **retired** and replaced by `skills/mcp-gateway`'s `register_target` MCP tool, which does the equivalent scope check server-side. `commands/pentest.md` Step 1 (and `workflows/pentest-parallel.js`'s init stage) still resolve a `scope.json` for the engagement the same way as before - first `./scope.json` in the operator's working directory, then a `scope: <path>` key in the `/pentest` context argument, then an auto-generated single-target scope if neither is provided - and write it to `$SESSION_DIR/scope.json`, since both the gateway and each agent's own explicit check (below) still read it from there.
 
-From then on, `skills/target-validation/scripts/scope-enforcement-hook.sh` (a `PreToolUse` hook registered in `hooks/hooks.json` for the `Bash|WebFetch` matcher) runs before every such tool call:
+**How the gateway's check works** (`skills/mcp-gateway/scope_gate.py` + `server.py`'s `register_target`):
 
-1. Extracts candidate targets from the command/URL via `scripts/extract-targets.py` (IPv4/CIDR, coarse IPv6, hostnames).
-2. Checks each candidate against `$SESSION_DIR/scope.json` using `scope-validator.sh` (same script as above, not duplicated logic).
-3. Maps the result to a permission decision: an explicitly excluded target is **denied** outright; a target that isn't listed either way triggers Claude Code's normal **confirmation prompt** (covers legitimate mid-engagement pivots to newly-discovered hosts); an explicitly in-scope target proceeds normally.
-4. If `scope.json` sets `authorized_techniques`, a small tool-name lookup (`sqlmap`→SQL injection, `hydra`/`medusa`→password attacks, etc.) also checks technique authorization. This is a best-effort MVP, not deep flag-level inference.
+1. `register_target(target)` classifies `target` against `$SESSION_DIR/scope.json` via `scope_gate.classify()`, which shells out to `scope-validator.sh` (same script and same matching semantics as above - CIDR / IP-range / wildcard-domain / exact-match - not duplicated logic).
+2. The result maps to a decision the same way the old hook's did: an explicitly excluded target is **denied** outright (raises an error); a target that isn't listed either way triggers a real MCP **elicitation** prompt asking the operator to confirm (covers legitimate mid-engagement pivots to newly-discovered hosts); an explicitly in-scope target registers immediately.
+3. This is on by default (`scope_enforcement` userConfig option, default `enforce`). Set it to `warn` to always register the target but log what would have happened to `$SESSION_DIR/logs/scope-enforcement.log`, or `off` to skip the scope check entirely. The gateway fails open (registers the target) on any *unexpected* internal error - as opposed to a clean out-of-scope/not-listed classification, which is a real decision, not an error - matching the old hook's fail-open design principle: a scope gate that can lock an authorized operator out of a fully-authorized engagement due to an internal bug is worse for adoption than no gate.
+4. Unlike the old hook, there is currently no automatic `authorized_techniques` (tool-name → technique) check anywhere in the gateway - that was hook-specific logic that hasn't been ported. `execute_command` and the gateway's other 5 tools also do not re-run a scope check themselves; `register_target` is the sole chokepoint, on the theory that every other tool operates on tokens that were already resolved through it.
 
-This is on by default (`scope_enforcement` userConfig option, default `enforce`). Set it to `warn` to log would-be violations to `$SESSION_DIR/logs/scope-enforcement.log` without blocking, or `off` to disable the hook. The hook fails open (allows the call through) on any internal error - missing `jq`/`python3`, a malformed `scope.json` - rather than risk locking an operator out of an authorized engagement; check that log file if scope enforcement seems to be silently doing nothing.
-
-This hook is defense-in-depth, not a substitute for the explicit "Verify target is in scope" check agents (e.g. `exploit-agent`) already do before exploitation - regex-based command parsing has real blind spots (obfuscation, indirect variable references), and the technique check only recognizes a small set of common tool names.
+**Current state**: `register_target`'s check only runs when `register_target` itself is called - not on every subsequent `execute_command`/`fetch_url`/etc. call (see point 4 above and "Scope-check integration" in `skills/mcp-gateway/SKILL.md`). That's no longer a caveat about missing coverage, though: all 9 `agents/*.md` files (`recon`, `decision`, `exploit`, `privesc`, `loot`, `cloud-recon`, `source-analyzer`, `verification`, `report`) now have their `tools:` frontmatter rewritten to grant exclusively the gateway's 7 MCP tools, with zero direct `Bash`/`Read`/`Write`/`WebFetch` grants left anywhere in the plugin - so every raw target an agent acts on has to pass through `register_target` first, which makes it the real, automatic, tool-call-level scope gate for those agents (see `exploit-agent`'s "Safety Checks" section, which now says exactly that and no longer instructs a manual `scope-validator.sh` call). The one exception is `verification-agent`, which deliberately does not hold `register_target` (see its "Gateway Calling Convention" section) and so still runs `scope-validator.sh` directly via `execute_command` before any re-attempt - nothing else gates it, so that explicit check remains the real, currently-active gate for that one agent specifically, not a redundant belt-and-suspenders step. Regex-based command parsing (extraction) always had real blind spots (obfuscation, indirect variable references) even when the old hook ran automatically on every call, so per-target `register_target`/`scope-validator.sh` checks were never purely redundant with it anyway.
 
 ## Network Information Gathering
 

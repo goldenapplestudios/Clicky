@@ -14,7 +14,7 @@ Provides comprehensive API security testing techniques for modern architectures 
 ### API Detection
 ```bash
 # Run comprehensive API testing script
-scripts/api-testing.sh {target} /tmp/api_results/
+${CLAUDE_PLUGIN_ROOT}/skills/api-security-testing/scripts/api-testing.sh {target} /tmp/api_results/
 
 # Common API endpoints
 /api
@@ -521,7 +521,7 @@ curl -I {target}/api/endpoint
 ### API Testing Script
 ```bash
 # Use our comprehensive API testing script
-scripts/api-testing.sh {target} /tmp/api_results/
+${CLAUDE_PLUGIN_ROOT}/skills/api-security-testing/scripts/api-testing.sh {target} /tmp/api_results/
 
 # The script automatically tests for:
 # - GraphQL introspection
@@ -529,8 +529,13 @@ scripts/api-testing.sh {target} /tmp/api_results/
 # - CORS misconfigurations
 # - Rate limiting
 # - API key security
-# - Mass assignment
-# - IDOR vulnerabilities
+# - Mass assignment (best-effort: resends a synthetic body with role/isAdmin/admin/permissions
+#   fields injected against endpoints it discovered live, and flags if they're accepted/echoed -
+#   a lead worth confirming by hand, not a confirmed finding on its own)
+#
+# IDOR is NOT automated by this script - confirming it requires two object IDs known to belong
+# to two different users/owners, which is target-specific context a generic script has no way
+# to obtain on its own. Test IDOR manually using the curl examples in the IDOR section above.
 ```
 
 ### Other Tools

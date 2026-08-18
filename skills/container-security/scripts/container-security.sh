@@ -171,6 +171,8 @@ enumerate_k8s_resources() {
 
 # Function to check for common misconfigurations
 check_k8s_misconfigurations() {
+    local target="${1:-localhost}"
+
     echo -e "${YELLOW}[*] Checking for Kubernetes misconfigurations...${NC}"
 
     # Check for default service accounts
@@ -187,13 +189,13 @@ check_k8s_misconfigurations() {
     # Check for exposed dashboard
     local dashboard_ports=(443 8443 8001 30000)
     for port in "${dashboard_ports[@]}"; do
-        if curl -sk --max-time 10 "https://localhost:$port" 2>/dev/null | grep -q "kubernetes-dashboard"; then
+        if curl -sk --max-time 10 "https://$target:$port" 2>/dev/null | grep -q "kubernetes-dashboard"; then
             echo -e "${RED}[!] Kubernetes Dashboard exposed on port $port${NC}"
         fi
     done
 
     # Check for Tiller (Helm v2)
-    if nc -zv -w2 localhost 44134 2>&1 | grep -q "succeeded\|open"; then
+    if nc -zv -w2 "$target" 44134 2>&1 | grep -q "succeeded\|open"; then
         echo -e "${RED}[!] Tiller (Helm v2) is running - known security issues${NC}"
     fi
 }
@@ -294,7 +296,7 @@ main() {
     # Test Kubernetes
     test_kubernetes_api "$target"
     enumerate_k8s_resources "$target"
-    check_k8s_misconfigurations
+    check_k8s_misconfigurations "$target"
 
     # Test for CVEs
     test_container_cves

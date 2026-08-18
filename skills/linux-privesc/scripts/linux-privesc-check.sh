@@ -29,9 +29,7 @@ echo "Groups: $(groups)"
 
 section "SUDO privileges"
 sudo -l 2>&1 || echo "(sudo -l failed or requires a password we don't have)"
-if command -v sudo >/dev/null 2>&1; then
-    echo "sudo version: $(sudo -V 2>/dev/null | head -1)"
-fi
+echo "sudo version: $(sudo -V 2>/dev/null | head -1)"
 
 section "SUID/SGID binaries"
 bash "$SCRIPT_DIR/suid-finder.sh"

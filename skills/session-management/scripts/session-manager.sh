@@ -18,8 +18,12 @@ create_session() {
     local session_id="pentest_$(date +%Y%m%d_%H%M%S)_$$"
     local session_dir="$SESSION_BASE/$session_id"
 
-    # Create directory structure
-    mkdir -p "$session_dir"/{recon,exploits,loot,reports,credentials,logs}
+    # Create directory structure. Matches the canonical session tree
+    # documented in docs/architecture.md's "Session Structure" section
+    # (singular "exploit", includes privesc/ and checkpoints/); credentials/
+    # and logs/ are additional real working directories this script (and
+    # state-persistence.sh's logs/attempts.jsonl) writes into.
+    mkdir -p "$session_dir"/{recon,exploit,privesc,loot,reports,checkpoints,credentials,logs}
 
     # Create session metadata
     cat > "$session_dir/session.json" << EOF
@@ -78,28 +82,33 @@ save_credentials() {
         return 1
     fi
 
-    # Append to appropriate file
+    # Append to appropriate file. cred_file is also used below for dedup, so
+    # that step targets the file actually written here instead of a naive
+    # "${cred_type}s.txt" pluralization (which is wrong for "credential" ->
+    # valid_creds.txt).
+    local cred_file
     case "$cred_type" in
         username)
-            echo "$value" >> "$session_dir/credentials/usernames.txt"
+            cred_file="$session_dir/credentials/usernames.txt"
             ;;
         password)
-            echo "$value" >> "$session_dir/credentials/passwords.txt"
+            cred_file="$session_dir/credentials/passwords.txt"
             ;;
         hash)
-            echo "$value" >> "$session_dir/credentials/hashes.txt"
+            cred_file="$session_dir/credentials/hashes.txt"
             ;;
         credential)
-            echo "$value" >> "$session_dir/credentials/valid_creds.txt"
+            cred_file="$session_dir/credentials/valid_creds.txt"
             ;;
         *)
             echo "WARNING: Unknown credential type: $cred_type"
             return 1
             ;;
     esac
+    echo "$value" >> "$cred_file"
 
     # Sort and deduplicate
-    sort -u "$session_dir/credentials/${cred_type}s.txt" -o "$session_dir/credentials/${cred_type}s.txt" 2>/dev/null || true
+    sort -u "$cred_file" -o "$cred_file" 2>/dev/null || true
 
     return 0
 }
@@ -257,9 +266,12 @@ archive_session() {
     # Create archive directory
     mkdir -p "$archive_dir"
 
-    # Update status to completed
+    # Update status to completed. end_time uses the same ISO-8601 format
+    # (date -Iseconds) as start_time/last_update above, rather than a raw
+    # Unix epoch float from jq's `now`.
     local temp_file=$(mktemp)
-    jq '.status = "completed" | .end_time = now | .phase = "archived"' \
+    jq --arg time "$(date -Iseconds)" \
+       '.status = "completed" | .end_time = $time | .phase = "archived"' \
        "$session_dir/session.json" > "$temp_file" && \
        mv "$temp_file" "$session_dir/session.json"
 

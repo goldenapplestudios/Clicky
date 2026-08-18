@@ -26,6 +26,8 @@ mkdir -p /tmp/.data/{docs,databases,configs,credentials}
 cp important_files /tmp/.data/
 ```
 
+Note: this on-target staging path is a temporary working directory used during the exfiltration process itself, separate from the operator-side `loot/<target>/` collection directory described elsewhere in this project's documentation — the two are not the same location and don't share a schema.
+
 ### Data Compression
 ```bash
 # Standard compression

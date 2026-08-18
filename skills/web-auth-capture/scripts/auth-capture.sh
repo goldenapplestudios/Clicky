@@ -163,7 +163,7 @@ curl_login() {
 
     curl -s -D "$work/response_headers.txt" -o "$work/response_body.html" \
         -X POST "$action_url" -H "Content-Type: $content_type" \
-        --cookie "$work/cookiejar_in.txt" --cookie-jar "$work/cookiejar_out.txt" \
+        --cookie-jar "$work/cookiejar_out.txt" \
         -d "$post_data" 2>"$work/post.err" || true
 
     if [ ! -s "$work/response_headers.txt" ]; then
