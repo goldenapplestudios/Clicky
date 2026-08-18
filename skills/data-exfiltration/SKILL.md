@@ -479,4 +479,5 @@ exec -a "[kworker/0:1]" /tmp/.systemd
 
 - Coordinates with credential-harvesting for password/key collection
 - Uses persistence-techniques to maintain exfil capability
+- Leverages evasion-techniques to avoid detection
 - Works with network-pivoting for multi-hop exfiltration

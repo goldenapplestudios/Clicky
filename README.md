@@ -171,9 +171,9 @@ Commands are defined in `commands/` as markdown files.
 - `/clicky:resume <session_id>` - Resume a session for further work
 - `/clicky:archive <session_id>` - Archive a completed session
 
-### Skills (26)
+### Skills (27)
 
-Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories. The two newest: **mcp-gateway** - the privacy/tokenization gateway architecture described above; **subdomain-enumeration** - crt.sh/Subfinder/Amass-based attack-surface mapping with takeover detection, run by recon-agent's Phase 0. See [Skills](docs/skills.md) for the full list.
+Skills are defined in `skills/{skill-name}/SKILL.md` with optional `scripts/`, `references/`, and `assets/` subdirectories. The two newest: **mcp-gateway** - the privacy/tokenization gateway architecture described above; **subdomain-enumeration** - crt.sh/Subfinder/Amass-based attack-surface mapping with takeover detection, run by recon-agent's Phase 0. **evasion-techniques** (AV/EDR/IDS/IPS/forensic-detection avoidance) was restored after an earlier scope-narrowing decision predating confirmed authorization safeguards - see [Ethical Use](#ethical-use) below. See [Skills](docs/skills.md) for the full list.
 
 ## Documentation
 
@@ -201,7 +201,7 @@ See the [docs/](docs/) directory for detailed documentation:
 
 This framework is for authorized security testing only. Always obtain written permission before testing. Respect scope boundaries and avoid destructive actions.
 
-Ethical safety here is enforced structurally - the MCP gateway's automatic scope check on `register_target` and the written-authorization requirement above - not by withholding exploitation capability from `exploit-agent`. That agent's full technique coverage (SQLi, AD attacks, container/cloud escapes, API exploitation, etc.) is core, required functionality for a working pentesting tool, on par with what Metasploit or Burp Suite ship; it is in scope for this project and shouldn't be pruned. Prior scope-narrowing in this repo removed the standalone `evasion-techniques` skill (AV/EDR evasion, a different and more detection-evasion-flavored capability) - that decision doesn't extend to `exploit-agent` itself.
+Ethical safety here is enforced structurally - the MCP gateway's automatic scope check on `register_target` and the written-authorization requirement above - not by withholding technique capability from `exploit-agent`/`loot-agent`/`privesc-agent`. Their full technique coverage (SQLi, AD attacks, container/cloud escapes, API exploitation, AV/EDR/IDS/IPS evasion, etc.) is core, required functionality for a working pentesting tool, on par with what Metasploit or Burp Suite ship; it is in scope for this project and shouldn't be pruned. The standalone `evasion-techniques` skill (AV/EDR/IDS/IPS/forensic-detection avoidance) was removed once during an earlier scope-narrowing pass, pending confirmation that the same structural authorization safeguards described above were sufficient for it too - it has since been restored now that they are: evasion technique documentation is a standard, expected part of an authorized red-team engagement testing whether an organization's defensive tooling actually catches a sophisticated attacker, gated by the exact same written-authorization requirement as everything else in this framework, not a separate carve-out.
 
 ## License
 

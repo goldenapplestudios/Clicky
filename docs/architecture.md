@@ -68,7 +68,7 @@ flowchart TB
     end
 
     subgraph SkillLayer["Skills Layer"]
-        SKILLS["26 Modular Skills<br/>(nmap, sqlmap, mcp-gateway, etc.)"]
+        SKILLS["27 Modular Skills<br/>(nmap, sqlmap, mcp-gateway, etc.)"]
     end
 
     subgraph StateLayer["State Layer"]
@@ -361,7 +361,7 @@ Clicky/
 |   |-- web-vulnerability-testing/
 |   |-- linux-privesc/
 |   |-- mcp-gateway/             # The privacy/tokenization gateway server (server.py, token_store.py, scope_gate.py)
-|   |-- ... (26 total)
+|   |-- ... (27 total)
 |
 |-- workflows/
 |   |-- pentest-workflow.md      # Multi-phase workflow definition
