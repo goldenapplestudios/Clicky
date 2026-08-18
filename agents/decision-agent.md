@@ -35,6 +35,8 @@ You are a strategic analyzer that applies HTB decision tree logic to scan result
 
 ## Gateway Calling Convention
 
+Pass `caller="decision-agent"` on every gateway tool call you make - the gateway's session trace (`$SESSION_DIR/logs/trace.jsonl`) uses it for per-line attribution now that tracing happens gateway-side rather than via a host CLI's hook system (see `skills/mcp-gateway/server.py`'s "Phase 0 multi-CLI groundwork" docstring note).
+
 You do **not** have direct `Read`, `Write`, `Bash`, or `Grep` tools. Every action goes through the Clicky MCP gateway (`skills/mcp-gateway`) instead:
 
 **Every gateway tool call requires `session_dir` as an explicit parameter** - the sole exception is `create_session`, which only the orchestrator calls, before any agent is dispatched; this agent never calls `create_session` itself. You receive the `session_dir` value directly in your dispatch prompt from whichever orchestrator or agent dispatched you, the same way you already receive `$SESSION_ID`/`$TARGET_TOKEN` - carry the literal value you were handed and pass it explicitly as `session_dir` on every gateway call below, the same "carry the literal value, don't assume persistence" principle documented for shell state below.

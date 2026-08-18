@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Real end-to-end check of skills/mcp-gateway/server.py: launches it as an
 actual subprocess over stdio, performs a real MCP `initialize` handshake,
-lists its tools, and drives all 7 tools through real `tools/call` requests
+lists its tools, and drives all 8 tools through real `tools/call` requests
 - including a real `create_session` bootstrap call, explicit `session_dir`
 threading through every other tool (no `SESSION_DIR` env var, no pointer
 file - see server.py/SKILL.md's "Session context" section), a real
 elicitation round-trip for register_target's NOT_LISTED case (an
 elicitation_callback on the client side auto-accepts, the same way an
-operator approving the prompt would), and confirmation that every
+operator approving the prompt would), confirmation that every
 session-scoped tool fails loudly (not silently) on a missing, nonexistent,
-or invalid `session_dir`.
+or invalid `session_dir`, and confirmation that gateway-side tracing
+(`_trace()`, `log_agent_boundary` - the Phase 0 multi-CLI groundwork that
+replaced the retired PostToolUse/PostToolUseFailure/SubagentStop hooks)
+actually writes correct, token-safe JSONL into the session's own
+logs/trace.jsonl.
 
 Not a unit test of token_store.py/scope_gate.py in isolation (see
 test_token_store.py / test_scope_gate.sh for those) - this is specifically
@@ -130,9 +134,12 @@ async def main() -> int:
                     "read_file",
                     "write_file",
                     "search_files",
+                    # Phase 0 multi-CLI groundwork: replaces the retired
+                    # SubagentStop hook's tracing - see server.py's docstring.
+                    "log_agent_boundary",
                 }
                 check(
-                    "tools/list reports exactly the 7 expected tools",
+                    "tools/list reports exactly the 8 expected tools",
                     tool_names == expected,
                     f"got {sorted(tool_names)}",
                 )
@@ -278,12 +285,33 @@ async def main() -> int:
                 # --- register_target: OUT_OF_SCOPE is refused ---
                 result = await session.call_tool(
                     "register_target",
-                    {"target": "198.51.100.5", "session_dir": str(session_dir)},
+                    {
+                        "target": "198.51.100.5",
+                        "session_dir": str(session_dir),
+                        "caller": "recon-agent",
+                    },
                 )
                 check(
                     "register_target(OUT_OF_SCOPE) is refused",
                     result.is_error,
                     f"isError={result.is_error} text={tool_text(result)!r}",
+                )
+                # A refused target must never get a token minted anywhere,
+                # including as a side effect of merely tracing the refusal
+                # (this is the exact bug class the tool_input redaction
+                # fix in register_target's OUT_OF_SCOPE/declined branches
+                # exists to prevent - see server.py's comments there).
+                token_map = json.loads(
+                    (session_dir / ".token-map.json").read_text()
+                )
+                check(
+                    "an OUT_OF_SCOPE-refused target never gets a token minted "
+                    "in .token-map.json, not even as a tracing side effect",
+                    all(
+                        entry["value"] != "198.51.100.5"
+                        for entry in token_map.get("tokens", {}).values()
+                    ),
+                    f"tokens={token_map.get('tokens')}",
                 )
 
                 # --- register_target: NOT_LISTED goes through elicitation, gets approved ---
@@ -365,6 +393,170 @@ async def main() -> int:
                     and "TARGET_1" in text
                     and "203.0.113.10" not in text,
                     f"isError={result.is_error} text={text!r}",
+                )
+
+                # --- Phase 0 multi-CLI groundwork: gateway-side tracing ---
+                # execute_command with an explicit `caller` - the trace record's
+                # "caller" field should reflect it, and its tool_input/tool_result
+                # should already be token-safe (no raw IP), same as what the
+                # caller sees. This replaces the retired PostToolUse/
+                # PostToolUseFailure/SubagentStop hooks (trace-logger.sh) - see
+                # server.py's "Phase 0 multi-CLI groundwork" docstring note.
+                result = await session.call_tool(
+                    "execute_command",
+                    {
+                        "command": "echo TARGET_1",
+                        "session_dir": str(session_dir),
+                        "caller": "recon-agent",
+                    },
+                )
+                check(
+                    "execute_command with a caller argument succeeds",
+                    not result.is_error,
+                    f"isError={result.is_error} text={tool_text(result)!r}",
+                )
+
+                trace_path = session_dir / "logs" / "trace.jsonl"
+                check(
+                    "trace.jsonl exists after gateway tool calls (gateway-side "
+                    "tracing, no external hook involved)",
+                    trace_path.is_file(),
+                    f"trace_path={trace_path}",
+                )
+
+                def read_trace():
+                    return [
+                        json.loads(line)
+                        for line in trace_path.read_text().splitlines()
+                        if line.strip()
+                    ]
+
+                caller_entries = [
+                    e
+                    for e in read_trace()
+                    if e.get("tool_name") == "execute_command"
+                    and e.get("caller") == "recon-agent"
+                ]
+                check(
+                    "trace.jsonl records the caller attribution passed on execute_command",
+                    len(caller_entries) == 1,
+                    f"matching entries={caller_entries}",
+                )
+                check(
+                    "trace.jsonl's execute_command entry is a tool_call event "
+                    "with the already-redacted result",
+                    bool(caller_entries)
+                    and caller_entries[0]["event"] == "tool_call"
+                    and "TARGET_1" in (caller_entries[0].get("tool_result") or "")
+                    and "203.0.113.10" not in (caller_entries[0].get("tool_result") or ""),
+                    f"entry={caller_entries[0] if caller_entries else None}",
+                )
+                trace_text = trace_path.read_text()
+                check(
+                    "no raw target value used anywhere in this run ever "
+                    "appears in trace.jsonl (gateway-side tracing logs the "
+                    "same already-redacted content the caller sees, never "
+                    "the resolved real value - including register_target's "
+                    "own raw `target` argument, the one gateway input that "
+                    "isn't already a token, and including the OUT_OF_SCOPE "
+                    "target that was refused, not registered)",
+                    all(
+                        raw not in trace_text
+                        for raw in (
+                            "203.0.113.10",
+                            "198.51.100.5",
+                            "192.0.2.77",
+                        )
+                    ),
+                    f"trace file length={len(trace_text)}",
+                )
+
+                # --- read_file on a nonexistent path triggers the OSError
+                # branch - confirm it's traced as a tool_error, not tool_call ---
+                result = await session.call_tool(
+                    "read_file",
+                    {
+                        "path": str(session_dir / "does-not-exist.txt"),
+                        "session_dir": str(session_dir),
+                        "caller": "loot-agent",
+                    },
+                )
+                error_entries = [
+                    e
+                    for e in read_trace()
+                    if e.get("tool_name") == "read_file" and e.get("caller") == "loot-agent"
+                ]
+                check(
+                    "read_file on a nonexistent path is traced as a tool_error event",
+                    len(error_entries) == 1 and error_entries[0]["event"] == "tool_error",
+                    f"matching entries={error_entries}",
+                )
+
+                # --- log_agent_boundary: start/end pair, replacing what the
+                # retired SubagentStop hook used to mark ---
+                result = await session.call_tool(
+                    "log_agent_boundary",
+                    {
+                        "agent_name": "recon-agent",
+                        "phase": "start",
+                        "session_dir": str(session_dir),
+                    },
+                )
+                check(
+                    "log_agent_boundary(phase=start) succeeds",
+                    not result.is_error,
+                    f"isError={result.is_error} text={tool_text(result)!r}",
+                )
+                result = await session.call_tool(
+                    "log_agent_boundary",
+                    {
+                        "agent_name": "recon-agent",
+                        "phase": "end",
+                        "session_dir": str(session_dir),
+                        "summary": "found TARGET_1 open on port 80",
+                    },
+                )
+                check(
+                    "log_agent_boundary(phase=end) with a summary succeeds",
+                    not result.is_error,
+                    f"isError={result.is_error} text={tool_text(result)!r}",
+                )
+                result = await session.call_tool(
+                    "log_agent_boundary",
+                    {
+                        "agent_name": "recon-agent",
+                        "phase": "bogus",
+                        "session_dir": str(session_dir),
+                    },
+                )
+                check(
+                    "log_agent_boundary rejects an invalid phase value",
+                    result.is_error,
+                    f"isError={result.is_error} text={tool_text(result)!r}",
+                )
+
+                boundary_entries = [
+                    e
+                    for e in read_trace()
+                    if e.get("tool_name") == "log_agent_boundary"
+                    and e.get("caller") == "recon-agent"
+                ]
+                start_events = [e for e in boundary_entries if e["event"] == "agent_start"]
+                end_events = [e for e in boundary_entries if e["event"] == "agent_end"]
+                check(
+                    "trace.jsonl records exactly one agent_start and one "
+                    "agent_end for the log_agent_boundary start/end pair "
+                    "(the rejected bogus-phase call never reaches _trace() at all)",
+                    len(start_events) == 1 and len(end_events) == 1,
+                    f"start={start_events} end={end_events}",
+                )
+                check(
+                    "the agent_end entry carries the summary text (token-safe, "
+                    "already resolved/redacted through the session's token store)",
+                    bool(end_events)
+                    and end_events[0].get("tool_result")
+                    == "found TARGET_1 open on port 80",
+                    f"end_events={end_events}",
                 )
 
     finally:

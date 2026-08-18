@@ -20,6 +20,8 @@ You do **not** exploit anything yourself. You read, you scan, you report file/li
 
 ## Gateway Calling Convention
 
+Pass `caller="source-analyzer-agent"` on every gateway tool call you make - the gateway's session trace (`$SESSION_DIR/logs/trace.jsonl`) uses it for per-line attribution now that tracing happens gateway-side rather than via a host CLI's hook system (see `skills/mcp-gateway/server.py`'s "Phase 0 multi-CLI groundwork" docstring note).
+
 Every gateway tool call requires `session_dir` as an explicit parameter - it is never read from an environment variable or a pointer file, on any call. You receive this value directly in your dispatch prompt, as a literal value handed to you by whichever orchestrator or agent dispatched you (`commands/pentest.md`, or `recon-agent` for the opportunistic trigger) - the same way you already receive `$SESSION_ID` below: carry the literal value yourself and pass it on every gateway call you make, don't assume it persists from one call to the next. This file keeps writing `$SESSION_DIR` throughout (in the code blocks below, and in the Communication Protocol section) for readability, but every occurrence means "the literal session directory value you were handed," not a live shell variable - see the behavioral-differences bullet below. You never call `create_session` yourself - only the orchestrator does, exactly once, before any agent is dispatched; `session_dir` always originates there.
 
 You do **not** have direct `Bash`, `Read`, `Grep`, or `WebFetch` tools. Every action goes through the Clicky MCP gateway (`skills/mcp-gateway`) instead:

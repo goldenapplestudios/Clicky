@@ -750,18 +750,18 @@ sequenceDiagram
 
 ### Audit Trail
 
-Every action is logged - but what gets logged, and what the model itself ever sees, is the **tokenized** view. `execute_command`'s `command` argument and `register_target`'s `target` argument are already tokens (`TARGET_1`, `CRED_HASH_1`, ...) by the time they reach the gateway, since agents never hold the raw value in the first place; and whatever comes back from the target is redacted (real values swapped for tokens) before it's returned to the agent. The `PostToolUse` trace log (`skills/session-management/scripts/trace-logger.sh`, `~/.claude/pentest-traces/<session>.jsonl`) records exactly that tokenized `tool_input`/`tool_result` pair, since it's logging the same content that flowed to and from the model:
+Every action is logged - but what gets logged, and what the model itself ever sees, is the **tokenized** view. `execute_command`'s `command` argument and `register_target`'s `target` argument are already tokens (`TARGET_1`, `CRED_HASH_1`, ...) by the time they reach the gateway, since agents never hold the raw value in the first place; and whatever comes back from the target is redacted (real values swapped for tokens) before it's returned to the agent. The trace log (written directly by the gateway server itself - `skills/mcp-gateway/server.py`'s `_trace()` helper - into `$SESSION_DIR/logs/trace.jsonl`, no external hook involved) records exactly that tokenized `tool_input`/`tool_result` pair, since it's logging the same content that flowed to and from the model:
 
 ```json
 {
   "timestamp": "2024-01-15T14:35:22Z",
-  "session_id": "pentest_20240115_143000",
-  "agent": "exploit-agent",
-  "action": "command_execution",
-  "command": "sqlmap -u 'http://TARGET_1/login' --dbs",
-  "target": "TARGET_1",
-  "result": "success",
-  "findings": ["database: wordpress", "database: mysql"]
+  "session_dir": "/home/user/.claude/sessions/pentest_20240115_143000",
+  "event": "tool_call",
+  "tool_name": "execute_command",
+  "caller": "exploit-agent",
+  "tool_input": {"command": "sqlmap -u 'http://TARGET_1/login' --dbs", "timeout_s": 300},
+  "tool_result": "[exit 0]\navailable databases [2]:\n[*] wordpress\n[*] mysql",
+  "error": null
 }
 ```
 

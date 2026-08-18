@@ -36,13 +36,16 @@ create_session() {
 }
 EOF
 
-    # Point the trace-logger hook (skills/session-management/scripts/trace-logger.sh)
-    # at this session, so its JSONL entries can be opportunistically tagged with
-    # this session directory. Best-effort only: a hook can't reliably learn
-    # Claude Code's own session_id from a plain Bash tool call, so the trace log
-    # itself is always keyed independently on that; this pointer is just a
-    # convenience cross-reference, and a concurrent second /pentest run will
-    # overwrite it, at which point earlier lines simply stop getting tagged.
+    # Point the Stop-hook recovery loop (skills/session-management/scripts/
+    # pentest-recovery-hook.sh's check_completion) at this session, so it
+    # knows which session's findings.json to check for a newly-confirmed
+    # CRITICAL/HIGH finding when deciding whether to keep blocking. This
+    # pointer is best-effort only and not load-bearing for anything else -
+    # the gateway's own tracing (skills/mcp-gateway/server.py's _trace())
+    # writes directly into each session's own logs/trace.jsonl and never
+    # reads this file. A concurrent second /pentest run will overwrite this
+    # pointer, at which point the recovery hook simply stops finding the
+    # earlier session.
     echo "$session_dir" > "$SESSION_BASE/.current-session"
 
     echo "$session_id"
@@ -279,7 +282,8 @@ archive_session() {
     mv "$session_dir" "$archive_dir/"
 
     # Clear the current-session pointer if it was pointing at this session,
-    # so the trace-logger hook stops tagging new lines with a moved directory.
+    # so the Stop-hook recovery loop (pentest-recovery-hook.sh) stops
+    # checking a now-archived/moved session for completion.
     if [ -f "$SESSION_BASE/.current-session" ] && [ "$(cat "$SESSION_BASE/.current-session" 2>/dev/null)" = "$session_dir" ]; then
         rm -f "$SESSION_BASE/.current-session"
     fi

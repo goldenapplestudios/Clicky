@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCP Gateway server - registered as an MCP server as of Phase 2.
 
-Exposes 7 MCP tools that resolve TARGET_n/CRED_*_n placeholder tokens to
+Exposes 8 MCP tools that resolve TARGET_n/CRED_*_n placeholder tokens to
 real values before acting, and redact real values back to tokens in
 whatever they return - so a caller only ever sees tokens in tool-call
 arguments and tool-result content, while the actual command execution /
@@ -20,17 +20,18 @@ requirements.txt pins the exact version) - not hand-rolled JSON-RPC.
 Session context: `session_dir` is an explicit, required parameter on every
 tool that operates *within* an existing session (`register_target`,
 `execute_command`, `fetch_url`, `read_file`, `write_file`,
-`search_files`) - never read from this process's own environment, never
-read from a pointer file written by some earlier call. The one exception
-is `create_session(target)`, which needs no `session_dir` because it
-creates one, and returns `{"session_dir": ..., "session_id": ...}` -
-that return value is the *only* source of truth for `session_dir` for the
-rest of an engagement. The caller (an orchestrating command/workflow, or
-an agent dispatched by one) captures it once and threads it through every
-later gateway call and Task-tool dispatch explicitly, the same way Clicky's
-agents already carry `$SESSION_ID` explicitly rather than assuming it's
-ambiently available (see `agents/exploit-agent.md`: "Substitute the literal
-session ID you were handed as part of your dispatch context").
+`search_files`, `log_agent_boundary`) - never read from this process's
+own environment, never read from a pointer file written by some earlier
+call. The one exception is `create_session(target)`, which needs no
+`session_dir` because it creates one, and returns `{"session_dir": ...,
+"session_id": ...}` - that return value is the *only* source of truth
+for `session_dir` for the rest of an engagement. The caller (an
+orchestrating command/workflow, or an agent dispatched by one) captures
+it once and threads it through every later gateway call and Task-tool
+dispatch explicitly, the same way Clicky's agents already carry
+`$SESSION_ID` explicitly rather than assuming it's ambiently available
+(see `agents/exploit-agent.md`: "Substitute the literal session ID you
+were handed as part of your dispatch context").
 
 This replaces an earlier, rejected design where `_session_dir()` read
 `$SESSION_DIR` from the process environment first, then silently fell back
@@ -52,6 +53,28 @@ returning `session_dir` directly to its caller, who threads it through
 everything downstream, fully replaces the need for one. See SKILL.md's
 "Session context" section for the full design.
 
+Phase 0 multi-CLI groundwork (see the multi-CLI portability plan this
+implements): every tool below now accepts an optional `caller` parameter
+(the calling agent's own name, e.g. "recon-agent" - every agent's prompt
+already knows its own identity) and appends a JSONL trace record to
+`$SESSION_DIR/logs/trace.jsonl` on every call, via the `_trace()` helper
+below. This replaces the previous hook-based tracing
+(`hooks/hooks.json`'s PostToolUse/PostToolUseFailure/SubagentStop entries
+-> skills/session-management/scripts/trace-logger.sh, now deleted), which
+depended on Claude Code's specific hook event names and payload contract,
+and cross-referenced Claude's own session_id against a separately
+maintained "current session" pointer file. Since every agent action
+already funnels through this gateway by construction, logging it here
+instead removes that dependency entirely - portable to any MCP-capable
+host, not just Claude Code - and keys trace records on `session_dir`
+directly: always an explicit, already-validated parameter on every call
+already, no pointer-file indirection needed. The new `log_agent_boundary`
+tool below replaces what the retired SubagentStop hook used to mark (an
+agent dispatch starting/finishing) - the orchestrating command/workflow
+calls it explicitly, the same way it already calls
+`create_session`/`register_target` explicitly rather than relying on
+ambient state.
+
 Run directly for stdio transport:
     python3 server.py
 (no `SESSION_DIR` env var needed or read - call `create_session` first,
@@ -59,6 +82,7 @@ over MCP, the same as any other client would.)
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -198,8 +222,59 @@ def _log_scope_event(session_dir: str, message: str) -> None:
         pass
 
 
+def _trace(
+    session_dir: str,
+    event: str,
+    tool_name: str,
+    caller: str = "",
+    tool_input: dict | None = None,
+    tool_result: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Best-effort append of one JSONL trace record to
+    $SESSION_DIR/logs/trace.jsonl.
+
+    Replaces the retired hook-based trace-logger.sh (PostToolUse/
+    PostToolUseFailure/SubagentStop in hooks/hooks.json), which depended
+    on Claude Code's specific hook event names/payload contract and
+    cross-referenced Claude's own session_id against a separately
+    maintained "current session" pointer file. Every action here already
+    flows through this gateway with an explicit, already-validated
+    session_dir, so this keys directly on that instead - no pointer-file
+    indirection, no dependency on any host CLI's hook system. See the
+    module docstring's "Phase 0 multi-CLI groundwork" note.
+
+    `tool_input`/`tool_result` are expected to already be in token form:
+    received arguments are already tokens by this gateway's whole design
+    (see module docstring), and callers pass the same already-redacted
+    string they're about to return as `tool_result` - this function does
+    not itself resolve or redact anything.
+
+    Never raises - a tracing failure must never break the underlying
+    tool call, same fail-open principle as `_log_scope_event` above.
+    """
+    try:
+        log_dir = Path(session_dir) / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        trace_path = log_dir / "trace.jsonl"
+        entry = {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "session_dir": session_dir,
+            "event": event,
+            "tool_name": tool_name,
+            "caller": caller or "unknown",
+            "tool_input": tool_input or {},
+            "tool_result": tool_result,
+            "error": error,
+        }
+        with open(trace_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
+
 @mcp.tool()
-def create_session(target: str) -> dict:
+def create_session(target: str, caller: str = "") -> dict:
     """Create a new Clicky session for `target` and return its session_dir/session_id.
 
     The one gateway tool that does NOT take `session_dir` - it creates one.
@@ -235,6 +310,13 @@ def create_session(target: str) -> dict:
     without calling session-manager.sh at all if it fails - not deferred
     to a later, already-session-scoped call the way it would have to be if
     validation instead ran through execute_command.
+
+    `caller` (optional) identifies whichever orchestrating command/agent
+    made this call, for the session trace - see `_trace()`. Failures
+    before a session_dir exists (validation, session-manager.sh errors)
+    have nowhere session-scoped to log to, so only the successful case is
+    traced here; those earlier failures surface directly as MCP errors
+    instead.
 
     Raises RuntimeError if `target` fails validation, session-manager.sh
     isn't found, the create subcommand fails, produces no session ID, or
@@ -303,16 +385,29 @@ def create_session(target: str) -> dict:
             f"validation: {exc}"
         ) from exc
 
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="create_session",
+        caller=caller,
+        tool_input={"target": target},
+        tool_result=f"session_id={session_id}",
+    )
+
     return {"session_dir": session_dir, "session_id": session_id}
 
 
 @mcp.tool()
-async def register_target(target: str, session_dir: str, ctx: Context) -> str:
+async def register_target(
+    target: str, session_dir: str, ctx: Context, caller: str = ""
+) -> str:
     """Classify `target` against `session_dir`'s scope.json and register a
     token for it.
 
     `session_dir` is required (the exact value `create_session()` returned
     at the start of this engagement) - see `_validate_session_dir()`.
+    `caller` (optional) identifies the calling agent, for the session
+    trace - see `_trace()`.
 
     Behavior is controlled by the scope_enforcement userConfig option
     (CLAUDE_PLUGIN_OPTION_SCOPE_ENFORCEMENT), replicating the retired
@@ -347,7 +442,23 @@ async def register_target(target: str, session_dir: str, ctx: Context) -> str:
     mode = _scope_enforcement_mode()
 
     if mode == "off":
-        return store.register(target, "target")
+        token = store.register(target, "target")
+        # store.redact(target) here (after register()) finds the value
+        # already known and substitutes its token - safe. Calling it
+        # *before* registration, or on a target that was never
+        # registered, would instead fall through to redact()'s own
+        # auto-discovery and mint a fresh token as a side effect of
+        # merely trying to log something - see the OUT_OF_SCOPE/declined
+        # branches below, which deliberately never do this.
+        _trace(
+            session_dir,
+            event="tool_call",
+            tool_name="register_target",
+            caller=caller,
+            tool_input={"target": store.redact(target), "mode": mode},
+            tool_result=token,
+        )
+        return token
 
     try:
         classification = scope_gate.classify(target, scope_path)
@@ -365,10 +476,39 @@ async def register_target(target: str, session_dir: str, ctx: Context) -> str:
                     f"WARN mode - would have asked: target '{target}' is not "
                     f"explicitly listed in scope.json ({scope_path})",
                 )
-            return store.register(target, "target")
+            token = store.register(target, "target")
+            # Safe to redact here - see the "off" branch above for why.
+            _trace(
+                session_dir,
+                event="tool_call",
+                tool_name="register_target",
+                caller=caller,
+                tool_input={
+                    "target": store.redact(target),
+                    "mode": mode,
+                    "classification": classification,
+                },
+                tool_result=token,
+            )
+            return token
 
         # mode == "enforce"
         if classification == scope_gate.OUT_OF_SCOPE:
+            # Deliberately do NOT call store.redact(target) here: the
+            # target was just refused, never registered, so redact()
+            # would fall through to its own auto-discovery and mint a
+            # fresh token for it as a side effect of merely tracing the
+            # refusal - defeating the point of refusing it. Log a
+            # placeholder instead; the real value is never registered
+            # anywhere by this branch.
+            _trace(
+                session_dir,
+                event="tool_error",
+                tool_name="register_target",
+                caller=caller,
+                tool_input={"target": "<refused, out of scope - not logged>", "mode": mode},
+                error=f"out of scope per {scope_path}",
+            )
             raise ValueError(
                 f"Target is explicitly out of scope per {scope_path}; refusing to register."
             )
@@ -383,17 +523,48 @@ async def register_target(target: str, session_dir: str, ctx: Context) -> str:
                 schema=ConfirmTargetRegistration,
             )
             if result.action != "accept" or not result.data.confirm:
+                # Same reasoning as the OUT_OF_SCOPE branch above: never
+                # register/mint a token, never redact() the raw value
+                # either, for exactly the same side-effect reason.
+                _trace(
+                    session_dir,
+                    event="tool_error",
+                    tool_name="register_target",
+                    caller=caller,
+                    tool_input={
+                        "target": "<refused, elicitation declined - not logged>",
+                        "mode": mode,
+                    },
+                    error=(
+                        "unlisted target registration not approved "
+                        f"(action={result.action})"
+                    ),
+                )
                 raise ValueError(
                     f"Registration of unlisted target '{target}' was not approved "
                     f"(elicitation action: {result.action})."
                 )
 
-        return store.register(target, "target")
+        token = store.register(target, "target")
+        # Safe to redact here - see the "off" branch above for why.
+        _trace(
+            session_dir,
+            event="tool_call",
+            tool_name="register_target",
+            caller=caller,
+            tool_input={
+                "target": store.redact(target),
+                "mode": mode,
+                "classification": classification,
+            },
+            tool_result=token,
+        )
+        return token
     except ValueError:
         # An explicit scope decision (deny, or elicitation declined/
         # cancelled) - a real decision, not an internal error, so it must
         # propagate rather than being swallowed by the fail-open handler
-        # below.
+        # below. Already traced at the raise points above.
         raise
     except Exception as exc:
         # Fail open on any *unexpected* internal error (e.g. scope_gate
@@ -404,24 +575,39 @@ async def register_target(target: str, session_dir: str, ctx: Context) -> str:
             f"internal error during scope check for target '{target}' "
             f"({exc!r}) - failing open, registering unconditionally",
         )
-        return store.register(target, "target")
+        token = store.register(target, "target")
+        # Safe to redact here - see the "off" branch above for why.
+        _trace(
+            session_dir,
+            event="tool_call",
+            tool_name="register_target",
+            caller=caller,
+            tool_input={"target": store.redact(target), "mode": mode},
+            tool_result=token,
+            error=f"internal error, failed open: {exc!r}",
+        )
+        return token
 
 
 @mcp.tool()
-def execute_command(command: str, session_dir: str, timeout_s: int = 300) -> str:
+def execute_command(
+    command: str, session_dir: str, timeout_s: int = 300, caller: str = ""
+) -> str:
     """Resolve tokens in `command` (using `session_dir`'s token map), run
     it, and return redacted output.
 
     `session_dir` is required (the exact value `create_session()` returned)
-    and validated up front - see `_validate_session_dir()`. Every call
-    resolves tokens before running and redacts output afterward; there is
-    no bootstrap exception anymore. `create_session()` is the one gateway
-    tool that doesn't need a `session_dir` (it creates one and returns it
-    before any other tool is ever called), so by the time `execute_command`
-    is ever invoked - including the very first bootstrap call of a brand-new
-    engagement, immediately after `create_session()` returns - a real
-    session directory with a real (possibly still-empty) `.token-map.json`
-    always exists to resolve/redact against.
+    and validated up front - see `_validate_session_dir()`. `caller`
+    (optional) identifies the calling agent, for the session trace - see
+    `_trace()`. Every call resolves tokens before running and redacts
+    output afterward; there is no bootstrap exception anymore.
+    `create_session()` is the one gateway tool that doesn't need a
+    `session_dir` (it creates one and returns it before any other tool is
+    ever called), so by the time `execute_command` is ever invoked -
+    including the very first bootstrap call of a brand-new engagement,
+    immediately after `create_session()` returns - a real session
+    directory with a real (possibly still-empty) `.token-map.json` always
+    exists to resolve/redact against.
 
     `command` is run through the shell (like Clicky's existing Bash tool)
     after every known token has been substituted for its real value.
@@ -446,15 +632,25 @@ def execute_command(command: str, session_dir: str, timeout_s: int = 300) -> str
     except subprocess.TimeoutExpired:
         output = f"[TIMEOUT after {timeout_s}s]"
 
-    return store.redact(output)
+    redacted = store.redact(output)
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="execute_command",
+        caller=caller,
+        tool_input={"command": command, "timeout_s": timeout_s},
+        tool_result=redacted,
+    )
+    return redacted
 
 
 @mcp.tool()
-def fetch_url(url: str, session_dir: str) -> str:
+def fetch_url(url: str, session_dir: str, caller: str = "") -> str:
     """Resolve tokens in `url`, fetch it, and return redacted output.
 
     `session_dir` is required (the exact value `create_session()`
-    returned) - see `_validate_session_dir()`.
+    returned) - see `_validate_session_dir()`. `caller` (optional)
+    identifies the calling agent, for the session trace - see `_trace()`.
 
     Uses httpx2 (already a transitive dependency of the `mcp` package
     itself - see requirements.txt) rather than adding a separate HTTP
@@ -471,15 +667,25 @@ def fetch_url(url: str, session_dir: str) -> str:
     except httpx2.HTTPError as e:
         output = f"[ERROR] {e}"
 
-    return store.redact(output)
+    redacted = store.redact(output)
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="fetch_url",
+        caller=caller,
+        tool_input={"url": url},
+        tool_result=redacted,
+    )
+    return redacted
 
 
 @mcp.tool()
-def read_file(path: str, session_dir: str) -> str:
+def read_file(path: str, session_dir: str, caller: str = "") -> str:
     """Resolve tokens in `path`, read the file, and return redacted content.
 
     `session_dir` is required (the exact value `create_session()`
-    returned) - see `_validate_session_dir()`.
+    returned) - see `_validate_session_dir()`. `caller` (optional)
+    identifies the calling agent, for the session trace - see `_trace()`.
     """
     session_dir = _validate_session_dir(session_dir)
     store = TokenStore(session_dir)
@@ -488,21 +694,42 @@ def read_file(path: str, session_dir: str) -> str:
     try:
         content = Path(resolved_path).read_text(errors="replace")
     except OSError as e:
-        return store.redact(f"[ERROR] {e}")
+        redacted = store.redact(f"[ERROR] {e}")
+        _trace(
+            session_dir,
+            event="tool_error",
+            tool_name="read_file",
+            caller=caller,
+            tool_input={"path": path},
+            error=redacted,
+        )
+        return redacted
 
-    return store.redact(content)
+    redacted = store.redact(content)
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="read_file",
+        caller=caller,
+        tool_input={"path": path},
+        tool_result=redacted,
+    )
+    return redacted
 
 
 @mcp.tool()
-def write_file(path: str, content: str, session_dir: str) -> str:
+def write_file(path: str, content: str, session_dir: str, caller: str = "") -> str:
     """Resolve tokens in both `path` and `content`, write the file, confirm.
 
     `session_dir` is required (the exact value `create_session()`
-    returned) - see `_validate_session_dir()`.
+    returned) - see `_validate_session_dir()`. `caller` (optional)
+    identifies the calling agent, for the session trace - see `_trace()`.
 
     Both `path`/`content` arguments are resolved token -> real value before
     writing, so an agent can compose file paths and content entirely out
-    of tokens.
+    of tokens. Only `path` (not the full `content`) is recorded in the
+    trace's `tool_input` - written content can be large and is already
+    fully recoverable from the file itself.
     """
     session_dir = _validate_session_dir(session_dir)
     store = TokenStore(session_dir)
@@ -514,17 +741,36 @@ def write_file(path: str, content: str, session_dir: str) -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(resolved_content)
     except OSError as e:
-        return store.redact(f"[ERROR] write to {resolved_path} failed: {e}")
+        redacted = store.redact(f"[ERROR] write to {resolved_path} failed: {e}")
+        _trace(
+            session_dir,
+            event="tool_error",
+            tool_name="write_file",
+            caller=caller,
+            tool_input={"path": path},
+            error=redacted,
+        )
+        return redacted
 
-    return store.redact(f"OK: wrote {len(resolved_content)} bytes to {resolved_path}")
+    redacted = store.redact(f"OK: wrote {len(resolved_content)} bytes to {resolved_path}")
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="write_file",
+        caller=caller,
+        tool_input={"path": path},
+        tool_result=redacted,
+    )
+    return redacted
 
 
 @mcp.tool()
-def search_files(pattern: str, path: str, session_dir: str) -> str:
+def search_files(pattern: str, path: str, session_dir: str, caller: str = "") -> str:
     """Resolve tokens, grep for `pattern` under `path`, return redacted matches.
 
     `session_dir` is required (the exact value `create_session()`
-    returned) - see `_validate_session_dir()`.
+    returned) - see `_validate_session_dir()`. `caller` (optional)
+    identifies the calling agent, for the session trace - see `_trace()`.
     """
     session_dir = _validate_session_dir(session_dir)
     store = TokenStore(session_dir)
@@ -546,7 +792,66 @@ def search_files(pattern: str, path: str, session_dir: str) -> str:
     except subprocess.TimeoutExpired:
         output = "[TIMEOUT]"
 
-    return store.redact(output)
+    redacted = store.redact(output)
+    _trace(
+        session_dir,
+        event="tool_call",
+        tool_name="search_files",
+        caller=caller,
+        tool_input={"pattern": pattern, "path": path},
+        tool_result=redacted,
+    )
+    return redacted
+
+
+_AGENT_BOUNDARY_PHASES = ("start", "end")
+
+
+@mcp.tool()
+def log_agent_boundary(
+    agent_name: str, phase: str, session_dir: str, summary: str = ""
+) -> str:
+    """Mark an agent dispatch starting or finishing, for the session trace.
+
+    `phase` must be "start" or "end". Replaces what the retired
+    SubagentStop hook used to mark (see module docstring's "Phase 0
+    multi-CLI groundwork" note) - the orchestrating command/workflow
+    (commands/pentest.md, or its per-CLI equivalent) calls this
+    explicitly immediately before and after each agent dispatch, the same
+    way it already calls create_session/register_target explicitly rather
+    than relying on any host CLI's hook system.
+
+    `summary` is optional free text on the "end" call only (e.g. a short
+    account of what the dispatched agent accomplished) - approximates
+    what the old hook payload's `last_assistant_message`/`stop_reason`
+    fields captured, now supplied explicitly by the caller instead of
+    reconstructed from a hook payload. It's resolved/redacted through the
+    session's token store like any other content-bearing argument, even
+    though it's expected to already be in token form.
+
+    `session_dir` is required (the exact value `create_session()`
+    returned) - see `_validate_session_dir()`.
+    """
+    session_dir = _validate_session_dir(session_dir)
+    if phase not in _AGENT_BOUNDARY_PHASES:
+        raise ValueError(
+            f"log_agent_boundary: phase must be one of {_AGENT_BOUNDARY_PHASES}, "
+            f"got {phase!r}"
+        )
+
+    store = TokenStore(session_dir)
+    redacted_summary = store.redact(store.resolve(summary)) if summary else ""
+
+    _trace(
+        session_dir,
+        event=f"agent_{phase}",
+        tool_name="log_agent_boundary",
+        caller=agent_name,
+        tool_input={"agent_name": agent_name, "phase": phase},
+        tool_result=redacted_summary or None,
+    )
+
+    return f"OK: logged {phase} boundary for agent {agent_name!r}"
 
 
 if __name__ == "__main__":

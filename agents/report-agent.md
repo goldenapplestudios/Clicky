@@ -19,6 +19,8 @@ This is the final stage of Clicky's reporting pipeline (see `docs/workflow.md`):
 
 ## Gateway Calling Convention
 
+Pass `caller="report-agent"` on every gateway tool call you make - the gateway's session trace (`$SESSION_DIR/logs/trace.jsonl`) uses it for per-line attribution now that tracing happens gateway-side rather than via a host CLI's hook system (see `skills/mcp-gateway/server.py`'s "Phase 0 multi-CLI groundwork" docstring note).
+
 Every gateway tool call requires `session_dir` as an explicit parameter - it is never read from an environment variable or a pointer file, on any call. You receive this value directly in your dispatch prompt, as a literal value handed to you by whichever agent or orchestrator dispatched you (`commands/pentest.md` Step 10, the only current caller) - the same "carry the literal value, don't assume persistence" principle documented below for `$SESSION_ID`: pass the literal `session_dir` value you were given on every gateway call you make, don't assume it persists from one call to the next. You never call `create_session` or `register_target` yourself - by the time a report is requested, the session and every target token its findings reference already exist; `$SESSION_ID`/`$SESSION_DIR` are simply handed to you, the same way they're handed to verification-agent.
 
 You do **not** have direct `Bash`, `Read`, `Write`, or `Grep` tools. Every action goes through the Clicky MCP gateway (`skills/mcp-gateway`) instead:

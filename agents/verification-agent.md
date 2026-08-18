@@ -20,6 +20,8 @@ This is Tier 2 of Clicky's two-tier finding validation (see `docs/workflow.md`).
 
 ## Gateway Calling Convention
 
+Pass `caller="verification-agent"` on every gateway tool call you make - the gateway's session trace (`$SESSION_DIR/logs/trace.jsonl`) uses it for per-line attribution now that tracing happens gateway-side rather than via a host CLI's hook system (see `skills/mcp-gateway/server.py`'s "Phase 0 multi-CLI groundwork" docstring note).
+
 Every gateway tool call requires `session_dir` as an explicit parameter - it is never read from an environment variable or a pointer file, on any call. You receive this value directly in your dispatch prompt, as a literal value handed to you by whichever agent or orchestrator dispatched you (`commands/pentest.md` Step 9.5, most commonly) - the same "carry the literal value, don't assume persistence" principle this section already documents below for `{target}`: pass the literal `session_dir` value you were given on every gateway call you make, don't assume it persists from one call to the next. You never call `create_session` yourself - by the time a finding reaches you for review, the session already exists and `session_dir` has already been created upstream of your dispatch; it's simply handed to you, the same way `{target}` is.
 
 You do **not** have direct `Bash`, `Read`, or `Grep` tools. Every action goes through the Clicky MCP gateway (`skills/mcp-gateway`) instead:
