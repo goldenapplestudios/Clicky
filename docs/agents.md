@@ -15,7 +15,9 @@
 7. [Cloud Recon Agent](#cloud-recon-agent)
 8. [Source Analyzer Agent](#source-analyzer-agent)
 9. [Verification Agent](#verification-agent)
-10. [Agent Interaction Patterns](#agent-interaction-patterns)
+10. [Report Agent](#report-agent)
+11. [Severity Analyst Agent](#severity-analyst-agent)
+12. [Agent Interaction Patterns](#agent-interaction-patterns)
 
 ---
 
@@ -26,7 +28,7 @@
 A regular AI conversation is stateless - you ask a question, get an answer, done. An **agent** is an AI configured to:
 
 1. **Perform tasks autonomously**: Execute commands, read files, make decisions
-2. **Use tools**: Bash commands, file operations, network requests
+2. **Use tools**: Run commands, read/write files, make network requests - in Clicky, every one of these goes through the MCP gateway (`mcp__plugin_clicky_clicky-gateway__*` tools) rather than a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` tool; see each agent's own "Gateway Calling Convention" section (e.g. `agents/recon-agent.md`) for how that works
 3. **Follow a specialized role**: Each agent is an expert in one domain
 4. **Produce structured output**: JSON that other agents can parse
 
@@ -82,6 +84,14 @@ flowchart LR
         VERIFY["Verification Agent"]
     end
 
+    subgraph Reporting["Phase 7: Reporting"]
+        REPORT["Report Agent"]
+    end
+
+    subgraph SeverityReview["Phase 8: Severity Review"]
+        SEVERITY["Severity Analyst Agent"]
+    end
+
     SRC --> DECISION
     RECON --> DECISION
     CLOUD --> DECISION
@@ -93,6 +103,8 @@ flowchart LR
     PRIVESC --> VERIFY
     LOOT --> VERIFY
     CLOUD --> VERIFY
+    VERIFY --> REPORT
+    REPORT --> SEVERITY
 ```
 
 ---
@@ -107,6 +119,26 @@ The Recon Agent is your **eyes and ears**. Before you can attack anything, you n
 - What services are running (what software is listening?)
 - What versions are installed (are they vulnerable?)
 - What environment is this (Linux? Windows? Cloud?)
+- What subdomains exist, for a domain target (is the attack surface bigger than the one host?)
+
+### Phase 0: Attack Surface Mapping
+
+Before any port scanning happens, the Recon Agent checks whether the target it was given is a domain name rather than a bare IP/range/CIDR (`skills/target-validation`). If it is, it maps the DNS attack surface first via `skills/subdomain-enumeration`, ahead of everything described below:
+
+```mermaid
+flowchart LR
+    START["Target given"] --> ISDOMAIN{"Domain name?<br/>(vs. bare IP/range/CIDR)"}
+    ISDOMAIN -->|No| SKIP["Skip straight to<br/>Step 1: Full port scan"]
+    ISDOMAIN -->|Yes| CASCADE["subdomain-enum.sh source cascade:<br/>crt.sh -> subfinder -> amass<br/>(passive by default)"]
+    CASCADE --> RESOLVE["Resolve every merged,<br/>deduped candidate (dig/host)"]
+    RESOLVE --> TAKEOVER{"CNAME matches a known<br/>provider + fingerprint hit?"}
+    TAKEOVER -->|Yes| FLAG["takeover_candidate_detected: true<br/>(hands the finding to Exploit Agent)"]
+    TAKEOVER -->|No| NEXT["Resolved names become new<br/>pivot targets (new tokens)"]
+    FLAG --> NEXT
+    NEXT --> STEP1["Step 1: Full port scan<br/>(for target + every pivot)"]
+```
+
+The source cascade degrades gracefully - each of the three sources (crt.sh certificate-transparency search, then `subfinder`, then `amass`) is skipped rather than treated as a failure if the tool isn't installed or returns nothing. `--active` (amass's own brute-force techniques) is only added when the engagement's rules of engagement explicitly permit it; the default is passive-only. A confirmed takeover candidate is a real, fingerprint-matched string hit on the response body, not just a CNAME pointing at a known provider - see `skills/subdomain-enumeration/SKILL.md` for the full methodology.
 
 ### How It Works
 
@@ -626,7 +658,7 @@ flowchart LR
     end
 
     subgraph Upgrade["Upgrade Process"]
-        S1["python -c 'import pty;<br/>pty.spawn(\"/bin/bash\")'"]
+        S1["python -c 'import pty;<br/>pty.spawn('/bin/bash')'"]
         S2["Ctrl+Z (background)"]
         S3["stty raw -echo; fg"]
         S4["export TERM=xterm"]
@@ -894,6 +926,10 @@ sequenceDiagram
     "method": "sudo_vim_escape"
   },
 
+  "credentials_found": [
+    {"username": "root", "hash": "$6$xyz...", "hash_type": "sha512crypt"}
+  ],
+
   "escalation_path": [
     {
       "step": 1,
@@ -1040,7 +1076,7 @@ sequenceDiagram
     L->>DB: SHOW DATABASES;
     DB-->>L: information_schema, mysql, app
 
-    L->>DB: USE app; SHOW TABLES;
+    L->>DB: USE app, SHOW TABLES;
     DB-->>L: users, orders, payments
 
     L->>DB: SELECT * FROM users;
@@ -1226,14 +1262,97 @@ flowchart LR
         RAW --> REATTEMPT --> VERDICT
     end
 
-    T2 --> REPORT["report-generator.sh:<br/>Confirmed Findings vs.<br/>Unverified / Needs Manual Review"]
+    T2 --> REPORT["Report Agent invokes<br/>report-generator.sh:<br/>Confirmed Findings vs.<br/>Unverified / Needs Manual Review"]
 ```
 
-It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to `Bash, Read, Grep` - no `Write`, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
+It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to the gateway's `execute_command`, `read_file`, and `search_files` - no write/register/fetch capability, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
+
+Tier 2 only answers whether a finding is *true*. Whether a true finding's *severity* is proportionate to real-world risk is a separate question, answered downstream of `report-agent` by [Severity Analyst Agent](#severity-analyst-agent) (Tier 3) - see that section below.
 
 ### Why `inconclusive` Is a Real Answer
 
 The agent is explicitly instructed not to default to `confirmed` when in doubt: if a re-attempt isn't safe (destructive, non-idempotent, or access has since been lost), it says so rather than guessing. Any CRITICAL/HIGH finding that comes back `refuted`, or that Tier 1 flagged as `fail`, is a hard gate in `report-generator.sh validate` - it cannot appear in the report's "Confirmed Findings" section.
+
+---
+
+## Report Agent
+
+### Purpose
+
+Every finding that survives Tier 1/Tier 2 validation still has to become an actual client-facing deliverable - CVSS scores, OWASP/CIS/NIST framework mapping, a risk matrix, and a narrative a non-technical stakeholder can act on. Before this agent existed, that compilation happened inside the same orchestrator context that had just spent an entire engagement issuing exploitation commands and tracking credentials and attack-chain state - `commands/pentest.md` Step 10 ran `report-generator.sh` directly and then wrote the framework-mapping narrative itself. The Report Agent gives reporting the same treatment the Verification Agent already gave finding review: a fresh, single-purpose context whose only job is turning already-finalized session data into a report, with no operational history to bias phrasing or tempt it into re-litigating a finding that was already settled upstream.
+
+### From Validated Findings to a Delivered Report
+
+```mermaid
+flowchart TD
+    DISPATCH["Orchestrator Task-dispatches<br/>report-agent with $SESSION_ID,<br/>$SESSION_DIR, format, interop flag"] --> VALIDATE
+
+    subgraph ReportAgent["Report Agent"]
+        VALIDATE["execute_command:<br/>report-generator.sh validate<br/>--session-id $SESSION_ID"]
+        VALIDATE -->|FAIL| SURFACE["Surface exactly which findings<br/>failed and why - stop, no Task<br/>tool to retry or override"]
+        VALIDATE -->|PASS| GENERATE["execute_command:<br/>report-generator.sh generate<br/>--format ... --output final_report.md"]
+        GENERATE --> INTEROP{"Interop exports<br/>requested?"}
+        INTEROP -->|yes| CONVERT["execute_command:<br/>interop-formats.sh sarif /<br/>sbom-partial / aibom-partial"]
+        INTEROP -->|no| NARRATIVE
+        CONVERT --> NARRATIVE["Compile CVSS/OWASP/CIS/NIST<br/>narrative, write_file back<br/>into final_report.md"]
+    end
+
+    SURFACE --> RESULT1["Return to Orchestrator:<br/>FAIL + failing finding IDs"]
+    NARRATIVE --> RESULT2["Return to Orchestrator:<br/>report path + short summary"]
+```
+
+### Why It Can't Re-Judge Findings
+
+The Report Agent has no `Task` tool and is never given raw trace evidence the way the Verification Agent is - only `findings.json`, already carrying each finding's `validation.tier1_trace_check`/`tier2_review` verdicts. If `report-generator.sh validate` reports a FAIL (a CRITICAL/HIGH finding that failed Tier 1 or was refuted by Tier 2), the agent surfaces exactly which findings and why, and stops - it cannot retry, override, or promote a refuted finding into "Confirmed Findings" itself. That gate lives in `report-generator.sh`'s own structural check, not in this agent's judgment, so there's no path for it to talk itself past a FAIL.
+
+### Scope Boundary
+
+The Report Agent wires into `commands/pentest.md` only. `workflows/pentest-parallel.js`'s dynamic-workflow stages have no confirmed mechanism to reference an `agents/*.md` file by name - its own `verification` stage already works around this by inlining a condensed charter rather than dispatching `verification-agent` via `Task`, and its reporting stage follows that same pre-existing pattern. That's a constraint of the parallel workflow engine, not something this agent changes.
+
+Report Agent is no longer the last thing that touches a session before it's considered complete: `commands/pentest.md` Step 11 dispatches [Severity Analyst Agent](#severity-analyst-agent) against the report this agent just drafted, before the engagement is considered done.
+
+---
+
+## Severity Analyst Agent
+
+### Purpose
+
+Tier 1 and Tier 2 both answer "is this finding true?" Neither ever asks "is the severity assigned to a true finding proportionate to real-world risk?" - an honestly-confirmed self-XSS reported as CRITICAL passes both cleanly and still misleads a client. This is a real, measured, industry-wide failure mode in AI-generated pentest reporting, not a hypothetical one (see `agents/severity-analyst-agent.md`'s "Why This Exists" for the research citations). The Severity Analyst Agent is Tier 3: an adversarial senior-analyst pass over the *whole drafted report* - not one finding at a time - specifically hunting for inflated severity, with a report-level "slop score" quantifying how much it found.
+
+### Why Cross-Model-Family, By Default
+
+The research this design is based on ("Refute-or-Promote," a real adversarial multi-agent review campaign) found that naively adding an adversarial reviewer isn't enough by itself: in one documented case, 80+ agents - including agents explicitly tasked with adversarial review - unanimously endorsed a vulnerability that didn't exist, because same-model-family reviewers share correlated blind spots that get *worse* with capability, not better. So this agent is dispatched two different ways depending on what's available:
+
+```mermaid
+flowchart TD
+    DRAFT["report-agent drafts<br/>final_report.md"] --> CHECK{"codex CLI<br/>installed?"}
+    CHECK -->|Yes| CROSS["tools/run-severity-critique.sh:<br/>codex exec, no MCP tools needed<br/>(report is already redacted text)"]
+    CHECK -->|No| SAME["Task-dispatch severity-analyst-agent<br/>as an ordinary same-family subagent"]
+    CROSS --> OUT["severity_critique.json<br/>review_mode: cross_family_codex"]
+    SAME --> OUT2["severity_critique.json<br/>review_mode: same_family_fallback"]
+```
+
+The cross-family path needs no gateway/MCP access at all - by the time report-agent has drafted a report, its content is already redacted/tokenized, so it's safe to hand directly to an external model with zero target/credential exposure. The same-family fallback is still useful (the kill-mandate/cold-start framing below does real work on its own), just a weaker calibration signal - which is why every review is tagged with which path produced it, rather than blending both into one number.
+
+### Kill Mandate, With a Counterweight
+
+Unlike Tier 2's "confirmed/refuted/inconclusive" framing, this agent's default posture is explicitly prosecutorial: find every reason a severity claim is unsupported, not "double-check it looks reasonable." It checks for Base-score-only scoring (ignoring compensating controls and realistic preconditions), unevidenced "could-chains" stacked into a certain-sounding outcome, and business-impact language stronger than what was actually demonstrated. The counterweight, because a purely downgrade-seeking reviewer creates its own failure mode (research on this exact problem found a false-positive-optimized critic suppressed over 20% of *genuinely real* findings in its best configuration): it's also instructed to flag under-scored findings, not just over-scored ones.
+
+### The Slop Score
+
+A 0-100 report-level score, weighted so that inflating the top of the severity scale (CRITICAL → MEDIUM) counts far more than inflating the bottom (MEDIUM → LOW) - see `agents/severity-analyst-agent.md`'s exact formula. Documented there as a tunable first pass, not a fixed law, meant to be revisited against real accumulated calibration data the same way every other heuristic in Clicky already is.
+
+### The Feedback Loop
+
+This is what makes Tier 3 a calibration mechanism, not a one-off critique. Every finding's delta is logged (`skills/session-management/scripts/severity-review-logger.sh`) to that session's `logs/severity_review.jsonl`, then aggregated across every session (`skills/session-management/scripts/severity-calibration-aggregator.sh`) into `.severity-calibration.json` - structurally identical to how `attempt-aggregator.sh` already computes real per-service success rates for `skills/htb-decision-tree` (same min-sample-size floor, same "insufficient_data" honesty over a misleadingly precise number). `report-agent` reads this file back on future engagements to flag categories it has historically over-scored - the actual mechanism that tunes the *reporting* agent's own judgment over time, not just this reviewing one.
+
+### What It Never Does
+
+Same restricted-reviewer posture as Verification Agent, one level further: no `write_file` (it argues its case in `rationale`, it doesn't rewrite anything), no `execute_command` at all (unlike Tier 2, nothing here is ever re-run live - it only reads already-drafted text and already-validated JSON), no `Task` tool. Its recommendation is surfaced in the report as a visible "Independent Severity Review" section, never silently substituted for the original severities - the same transparency principle the existing "Unverified / Needs Manual Review" section already uses. An operator who disagrees with it is allowed to.
+
+### Scope Boundary
+
+Wires into `commands/pentest.md` Step 11 only, same constraint as Report Agent - `workflows/pentest-parallel.js` has no confirmed mechanism to invoke it yet.
 
 ---
 

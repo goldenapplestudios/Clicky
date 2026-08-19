@@ -30,12 +30,22 @@ fi
 case "$MODE" in
     deep)
         echo "=== Deep service analysis: $TARGET ==="
-        nmap -sV -sC -A -T4 -oN /dev/stdout "$TARGET"
+        # nmap already prints normal-format results to stdout by default -
+        # -oN /dev/stdout used to be passed alongside that, which duplicated
+        # every line of output a second time.
+        nmap -sV -sC -A -T4 "$TARGET"
         ;;
     export)
         # Produce JSON matching this skill's documented Output Format schema
         XML_OUT=$(mktemp)
-        nmap -sV -oX "$XML_OUT" "$TARGET" >/dev/null 2>&1
+        NMAP_EXIT=0
+        nmap -sV -oX "$XML_OUT" "$TARGET" >/dev/null 2>&1 || NMAP_EXIT=$?
+
+        if [ "$NMAP_EXIT" -ne 0 ] || [ ! -s "$XML_OUT" ]; then
+            echo "ERROR: nmap scan failed or produced no output for target: $TARGET (exit code $NMAP_EXIT)" >&2
+            rm -f "$XML_OUT"
+            exit 1
+        fi
 
         if command -v python3 >/dev/null 2>&1; then
             python3 - "$XML_OUT" "$TARGET" << 'PYEOF'
@@ -45,7 +55,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 xml_file, target = sys.argv[1], sys.argv[2]
-tree = ET.parse(xml_file)
+try:
+    tree = ET.parse(xml_file)
+except ET.ParseError as exc:
+    print(f"ERROR: nmap XML output is malformed - scan may have been interrupted: {exc}", file=sys.stderr)
+    sys.exit(1)
 root = tree.getroot()
 
 services = []
@@ -77,11 +91,13 @@ output = {
 }
 print(json.dumps(output, indent=2))
 PYEOF
+            PY_EXIT=$?
+            rm -f "$XML_OUT"
+            exit $PY_EXIT
         else
             echo "ERROR: python3 required for --export-versions JSON output" >&2
             rm -f "$XML_OUT"
             exit 1
         fi
-        rm -f "$XML_OUT"
         ;;
 esac

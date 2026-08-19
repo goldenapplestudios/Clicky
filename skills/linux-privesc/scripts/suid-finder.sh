@@ -29,7 +29,8 @@ echo
 
 echo "=== Cross-reference against known GTFOBins-exploitable binary names ==="
 FOUND_EXPLOITABLE=0
-for bin_path in $SUID_BINS $SGID_BINS; do
+while IFS= read -r bin_path; do
+    [ -z "$bin_path" ] && continue
     bin_name=$(basename "$bin_path")
     for known in "${KNOWN_GTFOBINS[@]}"; do
         if [ "$bin_name" = "$known" ]; then
@@ -37,7 +38,7 @@ for bin_path in $SUID_BINS $SGID_BINS; do
             FOUND_EXPLOITABLE=1
         fi
     done
-done
+done <<< "$SUID_BINS"$'\n'"$SGID_BINS"
 
 if [ "$FOUND_EXPLOITABLE" -eq 0 ]; then
     echo "  None of the discovered SUID/SGID binaries matched the known-GTFOBins name list."

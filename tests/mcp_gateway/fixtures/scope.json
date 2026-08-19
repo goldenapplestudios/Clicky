@@ -1,0 +1,15 @@
+{
+  "engagement_id": "PT-TEST-001",
+  "client": "Fixture Corp",
+  "targets": {
+    "in_scope": [
+      "10.10.10.0/24",
+      "*.example-corp.test"
+    ],
+    "out_of_scope": [
+      "10.10.10.5"
+    ]
+  },
+  "restrictions": [],
+  "authorized_techniques": []
+}

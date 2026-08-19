@@ -94,8 +94,12 @@ flowchart TB
 | 3 | Exploit | 5-10 minutes | Attack attempts |
 | 4 | Privesc | 5-15 minutes | Escalate to root |
 | 5 | Loot | 3-5 minutes | Extract data |
-| 6 | Decision | 2 minutes | Generate report |
+| 6 | Report | 2 minutes | Generate report |
 | **Total** | - | **18-36 minutes** | Complete assessment |
+
+(Report generation is a dedicated `report-agent`, not the Decision Agent - it runs from a fresh, unbiased context rather than the operationally-loaded context that ran the rest of the engagement. See [Phase 6: Reporting](#phase-6-reporting) below.)
+
+(A drafted report also goes through one more independent pass before an engagement is considered complete - a Tier 3 adversarial review of the *severities* the report assigns, not the findings themselves. See [Tier 3: Independent Severity Review](#tier-3-independent-severity-review) under Phase 6.)
 
 ### Two Entry Points: `/pentest` vs `/pentest-parallel`
 
@@ -119,13 +123,19 @@ Default to `/clicky:pentest`. Reach for `/clicky:pentest-parallel` when you spec
 
 You can't attack what you don't know exists. Reconnaissance discovers the **attack surface** - every service running on the target that might be vulnerable.
 
+For a domain target (not a bare IP/range/CIDR), the Recon Agent now runs a **Phase 0: Attack Surface Mapping** step ahead of the port/service discovery below: subdomain discovery via a crt.sh -> Subfinder -> Amass cascade, resolution, and subdomain-takeover fingerprinting against a curated `can-i-take-over-xyz` subset (`skills/subdomain-enumeration`). Newly discovered subdomains become pivot targets in their own right, and a confirmed takeover candidate is handed opportunistically to the Exploit Agent the same way an exposed `.git` directory is. See [Skills → subdomain-enumeration](skills.md#subdomain-enumeration) and `agents/recon-agent.md`.
+
 ### Step-by-Step Process
+
+**Note on the diagram below**: it shows `R->>T` arrows directly for readability, but Recon Agent has no direct `Bash`/`WebFetch` tool in the current implementation. Every step here (`nmap`, the FTP/SMB/HTTP quick checks) is actually issued as an `execute_command`/`fetch_url` call through the Clicky MCP gateway (`skills/mcp-gateway`), which resolves the target's token to the real value immediately before running the command and redacts the target/any discovered credentials back to tokens in what's returned to the agent. See [Skills → mcp-gateway](skills.md#mcp-gateway) for the actual mechanism.
 
 ```mermaid
 sequenceDiagram
     participant O as Orchestrator
     participant R as Recon Agent
     participant T as Target
+
+    Note over O,T: Phase 0 (domain targets only): subdomain enumeration + takeover fingerprinting, omitted below for brevity - see skills/subdomain-enumeration
 
     Note over O,T: Phase 1 begins
 
@@ -394,6 +404,8 @@ flowchart LR
 ### Purpose
 
 This is where we actually **gain access** to the target. The Exploit Agent executes the attack plan, trying each priority until one succeeds.
+
+**Note on the diagrams in this phase**: the `E->>F`/`E->>W`/`S->>W` arrows below show direct agent-to-target interaction for readability, but Exploit Agent has no direct `Bash`/`WebFetch` tool in the current implementation. Every command shown (FTP login, sqlmap probes, upload requests) is actually issued as an `execute_command`/`fetch_url` call through the Clicky MCP gateway (`skills/mcp-gateway`), which resolves target tokens to real values immediately before running and redacts real values back to tokens in the result. See [Skills → mcp-gateway](skills.md#mcp-gateway).
 
 ### The Exploitation Loop
 
@@ -1029,6 +1041,35 @@ CVSS Score: 9.8 (Critical)
 2. Deploy intrusion detection system
 3. Conduct security awareness training
 ```
+
+### Tier 3: Independent Severity Review
+
+Tier 1 (`skills/session-management/scripts/finding-validator.sh`) and Tier 2 (`agents/verification-agent.md`, see [Verification Agent](agents.md#verification-agent)) both answer the same underlying question, at increasing cost: is a claimed finding actually *true*? Neither ever asks whether the severity assigned to a true finding is *proportionate* - an honestly-confirmed self-XSS reported as CRITICAL passes both tiers cleanly and still misleads a client. That's a distinct, well-documented failure mode in AI-generated security reporting (see `agents/severity-analyst-agent.md`'s "Why This Exists" for the research this is grounded in), and it's what Tier 3 exists to catch, once report-agent has drafted the whole report:
+
+```mermaid
+flowchart LR
+    DRAFT["report-agent drafts<br/>final_report.md<br/>(Step 10)"] --> TRY
+
+    subgraph T3["Tier 3 - Step 11"]
+        TRY{"Codex CLI<br/>available?"}
+        TRY -->|yes| CROSS["Cross-family review:<br/>tools/run-severity-critique.sh<br/>(different model family)"]
+        TRY -->|no| SAME["Same-family fallback:<br/>Task-dispatch<br/>severity-analyst-agent"]
+        CROSS --> CRITIQUE["severity_critique.json:<br/>per-finding deltas + slop_score"]
+        SAME --> CRITIQUE
+    end
+
+    CRITIQUE --> LOG["Logged to<br/>logs/severity_review.jsonl<br/>(calibration feedback loop)"]
+    CRITIQUE --> SURFACE["Appended to final_report.md as<br/>'Independent Severity Review'<br/>- never silently rewritten"]
+```
+
+Two things make this different from just "add another reviewer agent":
+
+- **It reviews the whole report together, not one finding at a time.** Systems thinking about cumulative risk, redundant controls, and realistic attack chains needs the full picture - a finding that looks CRITICAL in isolation may be one of five paths into an already-compromised system, or the report's own recon data may show a compensating control the severity assignment ignored. That's structurally unreachable from Tier 2's per-finding review, which is why this runs after the whole report is drafted, not inside Step 9.5.
+- **It prefers a genuinely different model family, not just a differently-prompted instance of the same one.** Naively "adding an adversarial reviewer" isn't sufficient by itself - same-family models share correlated blind spots that get *worse* with capability, documented in one real case where 80+ agents (including dedicated adversarial reviewers) unanimously endorsed a vulnerability that didn't exist. `tools/run-severity-critique.sh` dispatches the review through Codex CLI by default for exactly this reason, falling back to a same-family Task dispatch (still useful, just a weaker calibration signal) only if Codex CLI isn't installed - and the resulting data is tagged with which path produced it, so the aggregator below doesn't blend strong and weak signal together.
+
+**The feedback loop** is what makes this a calibration mechanism and not a one-off critique: every finding's delta (`skills/session-management/scripts/severity-review-logger.sh`) accumulates across sessions into `.severity-calibration.json` via `skills/session-management/scripts/severity-calibration-aggregator.sh` - structurally identical to how `attempt-aggregator.sh` already computes real per-service success rates for `skills/htb-decision-tree` (same min-sample-size floor, same "insufficient_data over a misleadingly precise number" posture). `report-agent` reads that file back on later engagements (Step 4) to flag categories this pipeline has historically over-scored, the mechanism that actually tunes the *reporting* agent's own judgment over time, not just the reviewing one.
+
+**Scope note**: like `report-agent` itself, this wires into `commands/pentest.md` only - `workflows/pentest-parallel.js`'s dynamic-workflow stages have no confirmed mechanism to invoke `severity-analyst-agent` or run `tools/run-severity-critique.sh` yet.
 
 ---
 

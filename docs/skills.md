@@ -18,6 +18,7 @@ mindmap
       target-validation
       fuzzing
       web-crawling
+      subdomain-enumeration
     White-Box Analysis
       source-code-analysis
     Exploitation
@@ -29,6 +30,7 @@ mindmap
       active-directory
       container-security
       cloud-infrastructure
+      evasion-techniques
     Privilege Escalation
       linux-privesc
       windows-privesc
@@ -37,6 +39,7 @@ mindmap
       data-exfiltration
       network-pivoting
     Management
+      mcp-gateway
       session-management
       htb-decision-tree
       tool-management
@@ -113,6 +116,10 @@ Directory/vhost/parameter fuzzing with a tool-preference cascade (ffuf -> feroxb
 ### web-crawling
 
 JS-aware endpoint discovery via katana (preferred) -> hakrawler -> stdlib-only static HTML link extraction. Closes the gap left by fixed-endpoint-path probing against modern SPA targets that only expose routes via client-side JavaScript/XHR. See `skills/web-crawling/SKILL.md`.
+
+### subdomain-enumeration
+
+DNS attack-surface mapping: a source cascade (crt.sh certificate-transparency search - always runs, free, no key - then subfinder, then amass, each skipped gracefully rather than failing if not installed) merges and dedupes candidate subdomains, resolves each (CNAME/A records), and fingerprints resolved CNAMEs against a curated subset of the `EdOverflow/can-i-take-over-xyz` reference list to flag possible subdomain takeovers (only a confirmed response-body fingerprint match is reported, not a bare CNAME-suffix match). Passive by default; `--active` opts into amass's own active/brute-force techniques and should only be used when scope explicitly allows it. Feeds `recon-agent`'s new Phase 0 (Attack Surface Mapping), which runs this ahead of port/service discovery whenever the target is a domain rather than a bare IP/range/CIDR - newly discovered subdomains become pivot targets, and a confirmed takeover candidate is handed opportunistically to `exploit-agent`. See `skills/subdomain-enumeration/SKILL.md`.
 
 ---
 
@@ -295,6 +302,15 @@ Cloud platform attacks.
 | Azure | MI | Token extraction |
 | GCP | Storage | Bucket enum |
 
+### evasion-techniques
+
+Detection avoidance methods.
+
+- WAF bypass patterns
+- IPS evasion (fragmentation, encoding)
+- Log evasion (timestomping)
+- AV bypass (obfuscation)
+
 ---
 
 ## Privilege Escalation Skills
@@ -395,6 +411,22 @@ Lateral movement techniques.
 ---
 
 ## Management Skills
+
+### mcp-gateway
+
+The MCP server behind every tool call in the plugin now, not just another skill an agent references. All 10 agents (`recon`, `decision`, `exploit`, `privesc`, `loot`, `cloud-recon`, `source-analyzer`, `verification`, `report`, `severity-analyst`) have had their `tools:` frontmatter rewritten to grant exclusively a subset of its `mcp__plugin_clicky_clicky-gateway__*` tools in place of direct Bash/Read/Write/WebFetch - zero direct tool grants remain anywhere else in Clicky. It's registered via `.claude-plugin/plugin.json`'s `mcpServers` block and launched by `scripts/launch.sh`.
+
+| Tool | Purpose |
+|------|---------|
+| `create_session(target)` | Validates the target and creates a new session; the only tool with no `session_dir` parameter - it produces one |
+| `register_target(target, session_dir)` | Scope-checks a target (`enforce`/`warn`/`off`, via the `scope_enforcement` userConfig option) and tokenizes it |
+| `execute_command(command, session_dir, timeout_s?)` | Resolves tokens in `command`, runs it through the shell, redacts the result |
+| `fetch_url(url, session_dir)` | Resolves tokens in `url`, fetches it, redacts the result |
+| `read_file(path, session_dir)` | Resolves tokens in `path`, reads the file, redacts the content |
+| `write_file(path, content, session_dir)` | Resolves tokens in both `path` and `content`, writes, confirms |
+| `search_files(pattern, path, session_dir)` | Resolves tokens, runs `grep -rn` under `path`, redacts the matches |
+
+Raw target IPs/hostnames and discovered credentials never flow to the model as plain tool-call content: `token_store.py` maintains a two-way token (`TARGET_1`, `CRED_HASH_1`, `CRED_KEY_1`, `CRED_APIKEY_1`, ...) <-> real-value map per session (`$SESSION_DIR/.token-map.json`, mode 0600), resolving tokens to real values before acting and auto-discovering/redacting real values back to tokens in whatever it returns. `register_target` is the sole scope-check chokepoint - every other tool operates only on values already registered through it. See `skills/mcp-gateway/SKILL.md` for the full token scheme, scope-check/elicitation flow, and session-context design.
 
 ### session-management
 

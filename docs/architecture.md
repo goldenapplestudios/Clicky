@@ -52,16 +52,23 @@ flowchart TB
     end
 
     subgraph AgentLayer["Agent Layer"]
-        RECON["Recon Agent<br/>(Haiku)"]
-        DECISION["Decision Agent<br/>(Sonnet)"]
-        EXPLOIT["Exploit Agent<br/>(Haiku)"]
-        PRIVESC["Privesc Agent<br/>(Haiku)"]
-        LOOT["Loot Agent<br/>(Haiku)"]
-        CLOUD["Cloud Recon Agent<br/>(Haiku)"]
+        RECON["Recon Agent"]
+        DECISION["Decision Agent"]
+        EXPLOIT["Exploit Agent"]
+        PRIVESC["Privesc Agent"]
+        LOOT["Loot Agent"]
+        CLOUD["Cloud Recon Agent"]
+        SOURCE["Source Analyzer Agent"]
+        VERIFY["Verification Agent"]
+        REPORT["Report Agent"]
+    end
+
+    subgraph GatewayLayer["MCP Gateway Layer"]
+        GW["clicky-gateway MCP server<br/>register_target / execute_command / fetch_url<br/>read_file / write_file / search_files / create_session<br/>tokenizes targets+credentials, checks scope, redacts output"]
     end
 
     subgraph SkillLayer["Skills Layer"]
-        SKILLS["22 Modular Skills<br/>(nmap, sqlmap, etc.)"]
+        SKILLS["27 Modular Skills<br/>(nmap, sqlmap, mcp-gateway, etc.)"]
     end
 
     subgraph StateLayer["State Layer"]
@@ -82,14 +89,22 @@ flowchart TB
     ORCH --> PRIVESC
     ORCH --> LOOT
     ORCH --> CLOUD
+    ORCH --> SOURCE
+    ORCH --> VERIFY
+    ORCH --> REPORT
 
-    RECON --> SKILLS
-    EXPLOIT --> SKILLS
-    PRIVESC --> SKILLS
-    LOOT --> SKILLS
-    CLOUD --> SKILLS
+    RECON --> GW
+    DECISION --> GW
+    EXPLOIT --> GW
+    PRIVESC --> GW
+    LOOT --> GW
+    CLOUD --> GW
+    SOURCE --> GW
+    VERIFY --> GW
+    REPORT --> GW
 
-    SKILLS --> TARGET
+    GW --> SKILLS
+    GW --> TARGET
 
     ORCH --> SESSION
     SESSION --> PERSIST
@@ -102,13 +117,15 @@ flowchart TB
 
 **2. Orchestration Layer**: The orchestrator (a powerful Sonnet model with extended thinking) receives your request. It's the "brain" that decides which agents to call and in what order.
 
-**3. Agent Layer**: Specialized agents execute specific phases. Each agent is a Claude model with a focused system prompt that makes it expert at one thing.
+**3. Agent Layer**: Specialized agents execute specific phases. Each agent is a Claude model with a focused system prompt that makes it expert at one thing. No agent holds a direct `Bash`/`Read`/`Write`/`Glob`/`Grep`/`WebFetch` tool grant anymore - every action an agent takes goes through the layer below instead.
 
-**4. Skills Layer**: Agents don't reinvent the wheel. They call reusable "skills" - modular libraries containing scripts, wordlists, and techniques for specific tasks.
+**4. MCP Gateway Layer**: A single long-lived MCP server (`skills/mcp-gateway`) sits between every agent and the real target. Agents call its 7 tools (`register_target`, `execute_command`, `fetch_url`, `read_file`, `write_file`, `search_files`, `create_session`) using tokens (`TARGET_1`, `CRED_HASH_1`, ...) instead of raw IPs, hostnames, or credentials. The gateway resolves those tokens to real values immediately before executing a command/fetch/file operation, checks the target against the engagement's `scope.json` (on `register_target`), performs the real operation, and redacts real values back to tokens in whatever it returns - so raw target/credential values are used at execution time but never need to flow through the model's own context in either direction.
 
-**5. State Layer**: Everything is tracked. If something fails, the system can recover from the last checkpoint.
+**5. Skills Layer**: Agents don't reinvent the wheel. They call reusable "skills" - modular libraries containing scripts, wordlists, and techniques for specific tasks - and the gateway's `execute_command`/`read_file`/etc. are what actually run those skills' scripts against the target.
 
-**6. Target Layer**: The actual system being tested.
+**6. State Layer**: Everything is tracked. If something fails, the system can recover from the last checkpoint.
+
+**7. Target Layer**: The actual system being tested. Only the gateway ever touches it directly - real values reach the target at execution time, resolved from tokens server-side.
 
 ---
 
@@ -120,7 +137,7 @@ An **agent** is a Claude model instance configured with:
 
 1. **System Prompt**: Instructions that make it specialized (e.g., "You are a reconnaissance expert...")
 2. **Model Selection**: Which Claude model to use (Haiku for speed, Sonnet for reasoning)
-3. **Tool Access**: Which tools (Bash, Read, Write, etc.) it can use
+3. **Tool Access**: Which of the MCP gateway's tools (`register_target`, `execute_command`, `fetch_url`, `read_file`, `write_file`, `search_files`, `create_session`) it can call - no agent holds a direct `Bash`/`Read`/`Write`/`Glob`/`Grep` grant
 4. **Skills**: Which skills the agent can invoke
 
 In Claude Code, agents are defined as **markdown files with YAML frontmatter** in the `agents/` directory:
@@ -133,40 +150,28 @@ agents/
 |-- privesc-agent.md
 |-- loot-agent.md
 |-- cloud-recon-agent.md
+|-- source-analyzer-agent.md
+|-- verification-agent.md
+|-- report-agent.md
 ```
 
-**Example Agent Definition** (`agents/recon-agent.md`):
+**Example Agent Definition** (`agents/recon-agent.md`, frontmatter as it actually reads today):
 
 ```markdown
 ---
 name: recon-agent
-description: Reconnaissance specialist for port scanning and service enumeration
-model: haiku
-tools:
-  - Bash
-  - Read
-  - Write
-  - Glob
-  - Grep
-skills:
-  - nmap-scanning
-  - service-enumeration
-  - osint-gathering
+description: Performs reconnaissance and enumeration of target systems including port scanning, service discovery, and vulnerability identification
+model: inherit
+color: blue
+tools: mcp__plugin_clicky_clicky-gateway__register_target, mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__fetch_url, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__search_files
+skills: nmap-scanning, service-enumeration, osint-gathering, web-vulnerability-testing, target-validation, web-auth-capture, fuzzing, web-crawling, session-management, htb-decision-tree, tool-management, subdomain-enumeration
 ---
 
-# Recon Agent
-
-You are a reconnaissance specialist. Your job is to enumerate
-the target and discover all services, versions, and potential
-attack vectors.
-
-## Responsibilities
-
-- Perform port scanning with nmap
-- Identify service versions
-- Enumerate web directories
-- Document all findings in structured format
+# Recon Agent - Target Enumeration Specialist
+...
 ```
+
+Every agent's `tools:` list is a subset of the 7 `mcp__plugin_clicky_clicky-gateway__*` gateway tools (`register_target`, `execute_command`, `fetch_url`, `read_file`, `write_file`, `search_files`, `create_session`) - never `Bash`, `Read`, `Write`, `Glob`, or `Grep` directly. Which subset an agent gets reflects what it actually needs: `recon-agent` gets `register_target` (it's the first agent to see a new target) but not `write_file`; `verification-agent` gets neither `register_target` nor `write_file` (it re-checks existing findings against an already-registered target and never fabricates new ones); `report-agent` gets `write_file` but not `register_target` or `fetch_url` (it only ever touches already-collected session data, never the live target). See each agent's own "Gateway Calling Convention" section (e.g. `agents/recon-agent.md`, `agents/verification-agent.md`) for the full rationale and calling pattern - notably, every gateway call requires an explicit `session_dir` argument; nothing is read from an environment variable or a pointer file.
 
 The YAML frontmatter (between `---` markers) defines the agent's configuration, while the markdown body provides the system prompt and detailed instructions.
 
@@ -308,23 +313,25 @@ sequenceDiagram
     end
 ```
 
-### Agent Models and Why
+### Agent Models: What's Actually Configurable
 
-| Agent | Model | Temperature | Why This Choice? |
-|-------|-------|-------------|------------------|
-| Orchestrator | Sonnet 4.5 | N/A | Complex reasoning, coordinates everything |
-| Recon | Haiku | 0.3 | Fast, structured output, low creativity needed |
-| Decision | Sonnet | 0.4 | Strategic analysis requires reasoning |
-| Exploit | Haiku | 0.2 | Precise execution, minimal creativity |
-| Privesc | Haiku | 0.3 | Methodical checking, deterministic |
-| Loot | Haiku | 0.2 | Systematic extraction, precision |
-| Cloud | Haiku | 0.3 | Fast enumeration, structured output |
+Every one of the 8 real agent files sets `model: inherit` in its frontmatter (verify with `grep -n "^model:" agents/*.md`) - there is no per-agent model selection anywhere in this repo. Each agent runs on whatever model the invoking Claude Code session (the orchestrator) is already using. There is also no `temperature:` field in Claude Code's subagent frontmatter schema at all - it was never a real capability here.
 
-**Temperature explained:**
+This section used to assert specific models (Haiku/Sonnet) and specific temperature values per agent. Those numbers had no implementation behind them - Claude Code subagents don't carry a temperature knob, and none of these agents pin a model - so they've been removed rather than reintroduced, consistent with the [`userConfig`](#configuration-via-userconfig) section's policy of not documenting settings nothing in this repo actually reads.
 
-- **0.0-0.3**: Very deterministic. Given the same input, you'll get nearly the same output. Good for precise tasks.
-- **0.4-0.6**: Balanced. Some creativity while staying focused.
-- **0.7-1.0**: Creative. More variation in responses. Not used here because we want reliable, repeatable attacks.
+What *is* real, and still useful for reading each agent's output, is how deterministic its task is - not because a model or temperature setting makes it so, but because of what the task itself demands:
+
+| Agent | Task Character | Why |
+|-------|----------------|-----|
+| Recon | Structured, low-judgment | Parses tool output into a fixed JSON shape; little room for interpretation |
+| Decision | Strategic | Weighs multiple services/vectors against calibrated success rates and prior findings |
+| Exploit | Structured, precise | Follows known attack patterns keyed to a specific service/vulnerability class |
+| Privesc | Structured, methodical | Works down a fixed priority list of escalation vectors |
+| Loot | Structured, systematic | Extraction and cataloguing against a known set of target locations |
+| Cloud Recon | Structured, low-judgment | Same shape as Recon, applied to cloud provider APIs |
+| Source Analyzer | Structured, precise | Static-analysis output mapped to a fixed schema |
+
+None of this is enforced by a model or temperature setting - `model: inherit` means all 10 agents share whatever model the orchestrator is running under.
 
 ### Directory Structure Explained
 
@@ -332,7 +339,8 @@ sequenceDiagram
 Clicky/
 |
 |-- .claude-plugin/
-|   |-- plugin.json              # Plugin manifest - tells Claude Code what this plugin does
+|   |-- plugin.json              # Plugin manifest - tells Claude Code what this plugin does,
+|   |                            #   including the mcpServers entry that registers clicky-gateway
 |
 |-- agents/                      # Agent definitions
 |   |-- recon-agent.md           # System prompt for reconnaissance
@@ -341,6 +349,9 @@ Clicky/
 |   |-- privesc-agent.md         # System prompt for privilege escalation
 |   |-- loot-agent.md            # System prompt for data extraction
 |   |-- cloud-recon-agent.md     # System prompt for cloud enumeration
+|   |-- source-analyzer-agent.md # System prompt for white-box source analysis
+|   |-- verification-agent.md    # System prompt for independent finding re-verification
+|   |-- report-agent.md          # System prompt for client-facing report synthesis
 |
 |-- commands/
 |   |-- pentest.md               # The /pentest command definition
@@ -349,7 +360,8 @@ Clicky/
 |   |-- nmap-scanning/           # Port scanning techniques
 |   |-- web-vulnerability-testing/
 |   |-- linux-privesc/
-|   |-- ... (22 total)
+|   |-- mcp-gateway/             # The privacy/tokenization gateway server (server.py, token_store.py, scope_gate.py)
+|   |-- ... (27 total)
 |
 |-- workflows/
 |   |-- pentest-workflow.md      # Multi-phase workflow definition
@@ -383,12 +395,12 @@ Agents communicate through **structured JSON**. This ensures data is:
 2. **Consistent**: Same format every time
 3. **Complete**: Required fields are always present
 
-**Recon Agent Output Example:**
+**Recon Agent Output Example** (`target` is the gateway-issued token, not a raw IP - see [Security Model](#security-model)):
 
 ```json
 {
   "status": "success",
-  "target": "10.10.10.10",
+  "target": "TARGET_1",
   "scan_time": "2024-01-15T14:30:00Z",
   "services": [
     {
@@ -474,17 +486,19 @@ Agents communicate through **structured JSON**. This ensures data is:
 sequenceDiagram
     participant O as Orchestrator
     participant A as Agent
-    participant S as Skill
+    participant GW as MCP Gateway
     participant T as Target
 
     O->>A: Execute task (JSON input)
 
-    Note over A: Parse input,<br/>determine actions
+    Note over A: Parse input,<br/>determine actions (e.g. invoke<br/>nmap-scanning skill's script)
 
-    A->>S: Invoke skill (e.g., nmap-scanning)
-    S->>T: Execute command (nmap -sV target)
-    T-->>S: Raw output
-    S-->>A: Parsed results
+    A->>GW: execute_command(command, session_dir)
+    Note over GW: Resolve tokens in command<br/>(TARGET_1 -> real value)
+    GW->>T: Execute command (nmap -sV target)
+    T-->>GW: Raw output
+    Note over GW: Redact real values<br/>back to tokens
+    GW-->>A: Redacted, parsed results
 
     Note over A: Analyze results,<br/>format output
 
@@ -699,48 +713,59 @@ flowchart TB
 
 ### Authorization Flow
 
-Before any testing begins:
+Before any testing begins, and before the model ever sees a raw target value:
 
-1. **Target Validation**: Is this a valid IP/domain?
-2. **Scope Check**: Is this target in the authorized scope?
-3. **Confirmation**: User confirms they have permission to test
+1. **Target Validation**: `create_session(target)` (the one gateway tool with no `session_dir` argument, since its job is to create one) validates the target via `skills/target-validation/scripts/validate-target.sh` and, if valid, creates the session directory.
+2. **Scope Check**: The first agent dispatched calls `register_target(target, session_dir)`. The gateway classifies the target against `$SESSION_DIR/scope.json` (`skills/target-validation/scripts/scope-validator.sh`'s CIDR/IP-range/wildcard-domain/exact-match rules, invoked server-side via `scope_gate.classify()`) as `IN_SCOPE`, `OUT_OF_SCOPE`, or `NOT_LISTED`.
+3. **Confirmation**: `IN_SCOPE` registers immediately and returns a token (e.g. `TARGET_1`); `OUT_OF_SCOPE` is refused outright; `NOT_LISTED` asks the operator to confirm via the MCP SDK's elicitation mechanism (`Context.elicit()`) before registering. From this point on, every agent and every gateway call uses the token - the raw target value is never passed back to the model.
+
+This replaces an earlier design where a `PreToolUse` hook (`skills/target-validation/scripts/scope-enforcement-hook.sh`, now deleted) ran the same scope-validator script in front of every raw `Bash`/`WebFetch` call. `register_target` is the single chokepoint today: every other gateway tool operates on tokens that were already resolved through it, so gating registration is equivalent to gating what real values ever enter the session's token map. Enforcement strength is configurable via the `scope_enforcement` userConfig option (default `enforce`): `enforce` blocks `OUT_OF_SCOPE` and elicits on `NOT_LISTED` as above; `warn` never blocks - it always registers, but logs what would have happened to `$SESSION_DIR/logs/scope-enforcement.log`; `off` skips the classification entirely. An *unexpected* internal error during this check still fails open (registers the target) rather than locking out an authorized operator - the same fail-open principle the old hook documented.
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant O as Orchestrator
-    participant V as Validator
+    participant A as Agent
+    participant GW as MCP Gateway
 
     U->>O: /pentest 10.10.10.10
-    O->>V: Validate target
-    V->>V: Check IP format
-    V->>V: Check against scope file
+    O->>GW: create_session(target)
+    GW->>GW: validate-target.sh
+    GW-->>O: {session_dir, session_id}
+    O->>A: dispatch (session_dir)
+    A->>GW: register_target(target, session_dir)
+    GW->>GW: classify() against scope.json
 
     alt In Scope
-        V-->>O: Target authorized
-        O->>U: Proceeding with test...
+        GW-->>A: token TARGET_1
+        A->>U: Proceeding with test...
+    else Not Listed
+        GW->>U: Elicit: confirm registration?
+        U-->>GW: Confirmed
+        GW-->>A: token TARGET_1
     else Out of Scope
-        V-->>O: Target not in scope
-        O->>U: ERROR: Target not authorized.<br/>Add to scope file to proceed.
+        GW-->>A: ERROR: Target not authorized.<br/>Add to scope file to proceed.
     end
 ```
 
 ### Audit Trail
 
-Every action is logged:
+Every action is logged - but what gets logged, and what the model itself ever sees, is the **tokenized** view. `execute_command`'s `command` argument and `register_target`'s `target` argument are already tokens (`TARGET_1`, `CRED_HASH_1`, ...) by the time they reach the gateway, since agents never hold the raw value in the first place; and whatever comes back from the target is redacted (real values swapped for tokens) before it's returned to the agent. The trace log (written directly by the gateway server itself - `skills/mcp-gateway/server.py`'s `_trace()` helper - into `$SESSION_DIR/logs/trace.jsonl`, no external hook involved) records exactly that tokenized `tool_input`/`tool_result` pair, since it's logging the same content that flowed to and from the model:
 
 ```json
 {
   "timestamp": "2024-01-15T14:35:22Z",
-  "session_id": "pentest_20240115_143000",
-  "agent": "exploit-agent",
-  "action": "command_execution",
-  "command": "sqlmap -u 'http://target/login' --dbs",
-  "target": "10.10.10.10:80",
-  "result": "success",
-  "findings": ["database: wordpress", "database: mysql"]
+  "session_dir": "/home/user/.claude/sessions/pentest_20240115_143000",
+  "event": "tool_call",
+  "tool_name": "execute_command",
+  "caller": "exploit-agent",
+  "tool_input": {"command": "sqlmap -u 'http://TARGET_1/login' --dbs", "timeout_s": 300},
+  "tool_result": "[exit 0]\navailable databases [2]:\n[*] wordpress\n[*] mysql",
+  "error": null
 }
 ```
+
+The real target value (`10.10.10.10:80`, in this example) is resolved from `TARGET_1` only transiently, inside the gateway server process, immediately before the actual `sqlmap` subprocess runs - it is never written back into the trace log, never returned to the agent, and never re-enters the model's context. The only durable record mapping `TARGET_1` back to the real value is `$SESSION_DIR/.token-map.json` (mode `0600`, local to the session directory on disk) - a file the model has no standing reason to read and Clicky's own tools never expose back to it. A final report generated by `report-agent` inherits the same redaction, so a client-facing deliverable stays tokenized too unless an operator deliberately cross-references `.token-map.json` themselves.
 
 This creates a complete record for:
 

@@ -1,2 +1,2 @@
-{"event": "PostToolUse", "clicky_session_dir": "__SESSION_DIR__", "tool_input": {"command": "sqlmap -u http://__SESSION_TARGET__/login.php?id=1 --dump"}, "tool_result": {"is_error": false}}
-{"event": "PostToolUseFailure", "clicky_session_dir": "__SESSION_DIR__", "tool_input": {"command": "ftp -n __SESSION_TARGET__ anonymous-login-script"}, "error": "connection refused"}
+{"event": "tool_call", "session_dir": "__SESSION_DIR__", "tool_name": "execute_command", "caller": "exploit-agent", "tool_input": {"command": "sqlmap -u http://__SESSION_TARGET__/login.php?id=1 --dump", "timeout_s": 300}, "tool_result": "[exit 0]\n...dumped data..."}
+{"event": "tool_error", "session_dir": "__SESSION_DIR__", "tool_name": "execute_command", "caller": "loot-agent", "tool_input": {"command": "ftp -n __SESSION_TARGET__ anonymous-login-script", "timeout_s": 300}, "error": "connection refused"}

@@ -425,17 +425,17 @@ ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/report-generator.sh auto 
 
 ## Session Review (Internal — Trace Log Analysis)
 
-Every tool call and subagent completion during a `/pentest` run is logged to a JSONL trace file by hooks (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`), so a run can be walked back through afterward — this is for improving Clicky itself, not something that belongs in the client-facing report above.
+Every gateway tool call and agent-dispatch boundary during a `/pentest` run is logged directly by the gateway server itself (`skills/mcp-gateway/server.py`'s `_trace()` helper and `log_agent_boundary` tool) to that session's own `$SESSION_DIR/logs/trace.jsonl`, so a run can be walked back through afterward — this is for improving Clicky itself, not something that belongs in the client-facing report above.
 
 ```bash
 # Review the most recent run
 ${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh
 
-# Review a specific run by Claude Code session ID
-${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh <claude_session_id>
+# Review a specific run by Clicky session ID
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh <session_id>
 
 # Review a specific trace file directly
-${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh ~/.claude/pentest-traces/<claude_session_id>.jsonl
+${CLAUDE_PLUGIN_ROOT}/skills/report-generation/scripts/session-review.sh ~/.claude/sessions/<session_id>/logs/trace.jsonl
 ```
 
 Output includes a chronological walk-through of every tool call and subagent completion, and a summary of failures grouped by agent. Use this to sanity-check `skills/htb-decision-tree`'s self-calibrated success rates against what actually happened in this run, and to feed generalized learnings into decision-agent's persistent memory (see `docs/agents.md`) — the trace log is the raw ground truth; memory is what gets distilled from it once a pattern repeats across engagements.

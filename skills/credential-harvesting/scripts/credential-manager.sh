@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ -n "${SESSION_DIR:-}" ] && [ -d "$SESSION_DIR" ]; then
     CRED_FILE="$SESSION_DIR/credentials/credential_store.json"
 else
@@ -26,13 +28,38 @@ init_store() {
     fi
 }
 
-# store "{username}" "{password}" "{hash}" "{service}" "{source}"
+# store "{username}" "{password}" "{hash}" "{service}" "{source}" [--target "{ip}"] [--hash-type "{type}"]
+#
+# --target and --hash-type are optional trailing flags (existing callers that
+# only pass the 5 positional args keep working - target defaults to empty,
+# and hash_type is auto-guessed from the hash via hash-identifier.py when a
+# hash is given and --hash-type isn't).
 store_credential() {
     local username="${1:-}"
     local password="${2:-}"
     local hash="${3:-}"
     local service="${4:-unknown}"
     local source="${5:-unknown}"
+    local target=""
+    local hash_type=""
+
+    if [ $# -gt 5 ]; then
+        shift 5
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --target) target="${2:-}"; shift 2 ;;
+                --hash-type) hash_type="${2:-}"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+    fi
+
+    if [ -n "$hash" ] && [ -z "$hash_type" ]; then
+        local identifier="$SCRIPT_DIR/hash-identifier.py"
+        if [ -f "$identifier" ] && command -v python3 >/dev/null 2>&1; then
+            hash_type=$(python3 "$identifier" "$hash" 2>/dev/null | awk '/^Likely type\(s\):/{getline; sub(/^  - /, ""); print; exit}')
+        fi
+    fi
 
     init_store
     local temp_file
@@ -41,7 +68,9 @@ store_credential() {
        --arg user "$username" \
        --arg pass "${password:-null}" \
        --arg hash "${hash:-null}" \
+       --arg htype "${hash_type:-null}" \
        --arg svc "$service" \
+       --arg tgt "${target:-null}" \
        --arg src "$source" \
        --arg ts "$(date -Iseconds)" \
        '.credentials += [{
@@ -49,8 +78,9 @@ store_credential() {
            "username": $user,
            "password": (if $pass == "null" or $pass == "" then null else $pass end),
            "hash": (if $hash == "null" or $hash == "" then null else $hash end),
-           "hash_type": null,
+           "hash_type": (if $htype == "null" or $htype == "" then null else $htype end),
            "service": $svc,
+           "target": (if $tgt == "null" or $tgt == "" then null else $tgt end),
            "source": $src,
            "tested": false,
            "working": false,
@@ -203,7 +233,7 @@ main() {
             echo "Usage: $0 <command> [arguments]"
             echo
             echo "Commands:"
-            echo "  store <user> <pass> <hash> <service> <source>"
+            echo "  store <user> <pass> <hash> <service> <source> [--target <ip>] [--hash-type <type>]"
             echo "  get --service <svc> | get --username <user> | get"
             echo "  list"
             echo "  export [--format json|csv]"

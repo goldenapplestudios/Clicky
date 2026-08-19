@@ -8,13 +8,15 @@ When a run fails partway through, or you just want to see how Clicky's actual ob
 
 ## Tier 1: Trace log (default, ships with the plugin)
 
-Every install gets this for free — no setup required. Three hooks (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`, defined in `hooks/hooks.json`) write one JSONL line per tool call or subagent completion to `~/.claude/pentest-traces/<claude_session_id>.jsonl`, tagged with which agent made the call (`agent_type`/`agent_id`) and, when the tool call failed, the actual error.
+Every install gets this for free — no setup required. Since every agent action already funnels through the `clicky-gateway` MCP server by construction, the gateway itself (`skills/mcp-gateway/server.py`'s `_trace()` helper) writes one JSONL line per gateway tool call directly into that session's own `$SESSION_DIR/logs/trace.jsonl`, tagged with which agent made the call (`caller`) and, when the call failed, the actual error. Agent-dispatch boundaries are marked the same way, via the `log_agent_boundary` gateway tool that `commands/pentest.md` calls immediately before/after each dispatch.
+
+This replaced an earlier design built on Claude-Code-specific `PostToolUse`/`PostToolUseFailure`/`SubagentStop` hooks (`hooks/hooks.json`) writing to a global `~/.claude/pentest-traces/<claude_session_id>.jsonl`, cross-referenced against a session via a separately-maintained pointer file — retired as part of Clicky's multi-CLI portability work, since it depended on a specific host CLI's hook event/payload contract. Gateway-side tracing has no such dependency (any MCP-capable host works identically) and keys directly on `session_dir` instead of a pointer-file guess.
 
 Review a run with:
 
 ```bash
 scripts/session-review.sh                    # most recent run
-scripts/session-review.sh <claude_session_id> # a specific run
+scripts/session-review.sh <session_id>        # a specific run
 ```
 
 (this script lives in `skills/report-generation/scripts/`). It prints a chronological walk-through and groups failures by agent, so you can see exactly where a run went sideways.
@@ -37,7 +39,11 @@ export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 export OTEL_TRACES_EXPORTER=otlp
 ```
 
-When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
+When filtering, `agent_type`/`agent.name` map onto Clicky's own agent names (`recon-agent`, `decision-agent`, `exploit-agent`, `privesc-agent`, `loot-agent`, `cloud-recon-agent`, `source-analyzer-agent`, `verification-agent`, `report-agent`), and `prompt.id`/`session.id` let you tie every event on a single `/pentest` invocation back together. See Claude Code's own [monitoring documentation](https://code.claude.com/docs/en/monitoring-usage) for the complete event/attribute reference.
+
+## A note on trace-log safety
+
+All 10 agents (see [Agents](agents.md)) hold gateway-only tool grants (`mcp__plugin_clicky_clicky-gateway__*`) - none has a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` tool. The gateway tokenizes target/credential values in what it hands back before its result ever reaches the model, and the model in turn only ever sends the gateway tokenized values (e.g. `TARGET_1`) rather than raw IPs/hostnames/credentials. `_trace()` (in `skills/mcp-gateway/server.py`) writes exactly the `tool_input`/`tool_result` values each tool call already received/computed - i.e. exactly what the model sent to and received from a tool call, nothing captured independently below that layer. The practical result is that Tier 1 trace logs (`$SESSION_DIR/logs/trace.jsonl`) end up token-safe by construction: real target/credential values shouldn't appear in them, because the gateway resolves tokens to real values only internally and redacts real values back to tokens before returning - the exact same already-redacted string that gets traced is what the model sees. This is an incidental benefit of the gateway architecture, not a separate redaction step tracing performs itself.
 
 ## Which one should I use?
 

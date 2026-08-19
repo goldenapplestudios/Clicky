@@ -2,10 +2,14 @@
 #
 # Fixture test for skills/session-management/scripts/finding-validator.sh's
 # Tier 1 mechanical trace cross-check. Uses a fake $HOME (finding-
-# validator.sh derives both SESSION_BASE and TRACE_DIR from $HOME/env, so
-# overriding HOME is enough - zero changes needed to the script itself to
-# make it testable) with three fixture findings covering the three
-# possible tier1_trace_check outcomes: no_evidence, pass, fail.
+# validator.sh derives SESSION_BASE from $HOME/env, so overriding HOME is
+# enough - zero changes needed to the script itself to make it testable)
+# with three fixture findings covering the three possible
+# tier1_trace_check outcomes: no_evidence, pass, fail. The trace log lives
+# at $SESSION_DIR/logs/trace.jsonl (written directly by the gateway
+# server's _trace() helper in real use - see skills/mcp-gateway/
+# server.py) rather than a global directory, so this fixture writes
+# straight into the session's own logs/ directory.
 #
 set -uo pipefail
 
@@ -21,13 +25,13 @@ trap 'rm -rf "$FAKE_HOME"' EXIT
 
 SESSION_ID="test_session"
 SESSION_DIR="$FAKE_HOME/.claude/sessions/$SESSION_ID"
-mkdir -p "$SESSION_DIR/reports" "$FAKE_HOME/.claude/pentest-traces"
+mkdir -p "$SESSION_DIR/reports" "$SESSION_DIR/logs"
 
 sed -e "s#__SESSION_TARGET__#10.10.10.5#g" \
     "$FIXTURES/findings.json.template" > "$SESSION_DIR/reports/findings.json"
 
 sed -e "s#__SESSION_DIR__#$SESSION_DIR#g" -e "s#__SESSION_TARGET__#10.10.10.5#g" \
-    "$FIXTURES/trace.jsonl.template" > "$FAKE_HOME/.claude/pentest-traces/trace1.jsonl"
+    "$FIXTURES/trace.jsonl.template" > "$SESSION_DIR/logs/trace.jsonl"
 
 output=$(HOME="$FAKE_HOME" bash "$VALIDATOR" validate-all --session-id "$SESSION_ID")
 echo "$output"

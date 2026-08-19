@@ -35,7 +35,14 @@ EXCLUDED_DIRS = {
 SCANNABLE_EXTENSIONS = {
     ".php", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".py", ".rb", ".java",
     ".go", ".aspx", ".asp", ".jsp",
+    ".tf", ".tfvars", ".tfstate", ".yml", ".yaml",
 }
+
+# Extensionless files worth scanning by basename alone - os.path.splitext
+# never matches these (there's no "." to split on), so iter_source_files()
+# checks this allowlist alongside SCANNABLE_EXTENSIONS rather than folding
+# it into that set.
+SCANNABLE_BASENAMES = {"Jenkinsfile", "Dockerfile"}
 
 # Untrusted-input source patterns, by language/framework family. All are
 # matched as substrings via regex search, not full-line matches.
@@ -94,13 +101,31 @@ SQL_CONCAT_RE = re.compile(r"""
 """, re.VERBOSE)
 
 SECRET_PATTERNS = [
-    ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("slack_token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
     ("api_key", re.compile(r"(?i)(api[_-]?key|secret|token)[^=:\n]{0,10}[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]")),
     ("hardcoded_password", re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"][^'\"]{4,}['\"]")),
     ("db_connection_string", re.compile(r"(?i)(mysql|postgres(?:ql)?|mongodb)://[^:\s'\"]+:[^@\s'\"]+@")),
 ]
+
+# Private key blocks are handled separately from SECRET_PATTERNS above
+# (see scan_file()) rather than in its per-line loop: a PEM block spans
+# multiple physical lines, and everything in SECRET_PATTERNS is matched
+# one readlines()-line at a time, so re.DOTALL on a single-line string is
+# a no-op unless BEGIN and END happen to land on the same line (e.g. a
+# key inlined as an escaped-newline JSON string value, as .tfstate files
+# often do - that case already matched fine without DOTALL). Matching
+# this pattern once against the whole file's text instead - with
+# re.DOTALL now doing real work - also catches the far more common case
+# of a real multi-line PEM block in ordinary source, which a naive
+# per-line application of this same BEGIN...END pattern would have
+# silently stopped matching altogether (the old header-only pattern had
+# no END requirement, so it matched per-line; adding END without also
+# moving off the per-line loop would have been a regression, not a fix).
+PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
 
 TAINT_WINDOW_LINES = 5
 
@@ -118,7 +143,7 @@ def iter_source_files(root):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".")]
         for fn in filenames:
-            if os.path.splitext(fn)[1] in SCANNABLE_EXTENSIONS:
+            if os.path.splitext(fn)[1] in SCANNABLE_EXTENSIONS or fn in SCANNABLE_BASENAMES:
                 yield os.path.join(dirpath, fn)
 
 
@@ -144,6 +169,24 @@ def nearest_source(lines, idx):
 
 def scan_file(path, rel_path, findings, next_id):
     lines = read_lines(path)
+
+    # Private key blocks: matched once against the whole file's joined
+    # text so a genuine multi-line PEM block is caught end-to-end - see
+    # PRIVATE_KEY_RE's comment for why this can't live in the per-line
+    # loop below alongside the rest of SECRET_PATTERNS.
+    full_text = "".join(lines)
+    for m in PRIVATE_KEY_RE.finditer(full_text):
+        line_no = full_text.count("\n", 0, m.start()) + 1
+        findings.append({
+            "id": f"src-{next_id[0]}",
+            "type": "hardcoded_secret",
+            "file": rel_path,
+            "line": line_no,
+            "secret_type": "private_key",
+            "confidence": "high",
+        })
+        next_id[0] += 1
+
     for idx, line in enumerate(lines):
         # Sink patterns (non-SQL)
         matched_type = None

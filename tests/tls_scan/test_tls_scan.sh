@@ -114,14 +114,22 @@ python3 "$HERE/mock_tls_server.py" "$PORT" "$WORK/cert.pem" "$WORK/key.pem" &
 SERVER_PID=$!
 
 ready=0
+server_died=0
 for _ in $(seq 1 30); do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "FAIL: mock TLS server process (PID $SERVER_PID) died before becoming ready"
+        server_died=1
+        break
+    fi
     if curl -sk --max-time 1 "https://127.0.0.1:$PORT/" >/dev/null 2>&1; then
         ready=1
         break
     fi
     sleep 0.2
 done
-if [ "$ready" != "1" ]; then
+if [ "$server_died" = "1" ]; then
+    FAILED=1
+elif [ "$ready" != "1" ]; then
     echo "FAIL: mock TLS server never became ready on port $PORT"
     FAILED=1
 else

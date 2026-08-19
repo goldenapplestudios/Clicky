@@ -16,7 +16,7 @@ Session ID: **$session_id**
 ${CLAUDE_PLUGIN_ROOT}/skills/session-management/scripts/session-manager.sh archive "$session_id"
 ```
 
-This moves the whole session directory under `archived/`, sets `status: "completed"`/`phase: "archived"` in its `session.json`, and clears the `.current-session` pointer if it was pointing at this session (so the `trace-logger.sh` hook stops tagging new trace lines with a now-moved path).
+This moves the whole session directory under `archived/`, sets `status: "completed"`/`phase: "archived"` in its `session.json`, and clears the `.current-session` pointer if it was pointing at this session (so the Stop-hook recovery loop, `pentest-recovery-hook.sh`, stops checking a now-archived/moved session for completion).
 
 `disable-model-invocation: true` here deliberately - archiving moves a directory and is more of a deliberate operator action than `/clicky:sessions`'s read-only status check, so it should only run on an explicit `/clicky:archive` invocation, not something Claude decides to do on its own judgment mid-conversation.
 

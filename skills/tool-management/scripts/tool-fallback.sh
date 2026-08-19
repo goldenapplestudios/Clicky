@@ -166,6 +166,46 @@ get_fallback_command() {
                     ;;
             esac
             ;;
+
+        sqli)
+            local sqli_tool=$(get_sqli_tool)
+            case "$sqli_tool" in
+                sqlmap)
+                    echo "sqlmap -u \"$target\" --batch --dbs"
+                    ;;
+                sqlninja)
+                    echo "sqlninja -m t -t $target"
+                    ;;
+                *)
+                    echo "echo 'No automated SQL injection tool available - manual testing required'"
+                    ;;
+            esac
+            ;;
+
+        password)
+            local password_tool=$(get_password_tool)
+            case "$password_tool" in
+                hydra)
+                    echo "hydra -L users.txt -P passwords.txt $target"
+                    ;;
+                medusa)
+                    echo "medusa -h $target -U users.txt -P passwords.txt"
+                    ;;
+                ncrack)
+                    echo "ncrack -U users.txt -P passwords.txt $target"
+                    ;;
+                patator)
+                    echo "patator ssh_login host=$target user=FILE0 password=FILE1 0=users.txt 1=passwords.txt"
+                    ;;
+                *)
+                    echo "echo 'No password attack tool available'"
+                    ;;
+            esac
+            ;;
+
+        *)
+            echo "echo 'Unknown tool type: $tool_type'"
+            ;;
     esac
 }
 
@@ -192,13 +232,55 @@ main() {
             ;;
 
         *)
-            echo "Usage: $0 [list|get <tool_type> <target> [port]]"
-            echo ""
-            echo "Tool types:"
-            echo "  port_scan    - Port scanning tools"
-            echo "  web_enum     - Web enumeration tools"
-            echo "  smb_enum     - SMB enumeration tools"
-            exit 1
+            # Bare tool-name mode: tool-fallback.sh <tool-name>
+            # Looks up which category the requested tool belongs to and
+            # returns the best available option in that category: the
+            # requested tool itself if it's installed, otherwise the best
+            # detected fallback tool name (e.g. "sqlninja", "medusa"), or
+            # "none"/"manual" if nothing usable is found. This mirrors what
+            # the agent files call before invoking a possibly-missing tool
+            # (e.g. sqlmap, hydra, gobuster) - no target argument required,
+            # since only a tool name (not a fallback command line) is
+            # returned. Use `get <tool_type> <target> [port]` instead when
+            # a ready-to-run fallback command is needed.
+            local tool_name="$action"
+            local tool_category=""
+
+            case "$tool_name" in
+                sqlmap|sqlninja)
+                    tool_category="sqli"
+                    ;;
+                hydra|medusa|ncrack|patator)
+                    tool_category="password"
+                    ;;
+                gobuster|ffuf|dirb|dirbuster|wfuzz)
+                    tool_category="web_enum"
+                    ;;
+                nmap|masscan|rustscan|zmap)
+                    tool_category="port_scan"
+                    ;;
+                enum4linux|smbclient|crackmapexec|smbmap)
+                    tool_category="smb_enum"
+                    ;;
+                msfconsole)
+                    tool_category="exploit"
+                    ;;
+            esac
+
+            if command_exists "$tool_name"; then
+                echo "$tool_name"
+            elif [ -n "$tool_category" ]; then
+                case "$tool_category" in
+                    sqli)      get_sqli_tool ;;
+                    password)  get_password_tool ;;
+                    web_enum)  get_web_enumerator ;;
+                    port_scan) get_port_scanner ;;
+                    smb_enum)  get_smb_tool ;;
+                    exploit)   get_exploit_framework ;;
+                esac
+            else
+                echo "none"
+            fi
             ;;
     esac
 }

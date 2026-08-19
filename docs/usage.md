@@ -99,9 +99,12 @@ When you install Clicky (`/plugin install clicky@clicky`) or reload it after a l
 |---------|------|---------|---------|
 | Default password wordlist | file | `/usr/share/wordlists/rockyou.txt` | Credential-attack skills (hydra/hashcat) when an engagement doesn't specify its own list |
 | Default username wordlist | file | `/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt` | Same, for username spraying/enumeration |
+| Default web content wordlist directory | directory | *(unset — falls back to the plugin's bundled wordlists in `skills/fuzzing/assets/wordlists/`)* | Root of a SecLists-style wordlist collection used by the fuzzing skill for directory/vhost/parameter wordlists when an engagement doesn't specify its own list. Distinct from the password/username wordlists above, which are hydra/hashcat credential lists, not web-content wordlists |
 | Max parallel operations | number | `3` | Upper bound on concurrent service checks for `/clicky:pentest-parallel` only — the standard `/clicky:pentest` command runs sequentially regardless of this setting |
 | Confirm before exploitation | boolean | `false` | If `true`, `/clicky:pentest` pauses after strategic analysis and asks for explicit confirmation before running any exploitation commands. **Not honored by `/clicky:pentest-parallel`** — a running dynamic workflow can't pause for mid-run input |
 | Default session/output directory | directory | `~/.claude/sessions` | Where session data, loot, and reports are written |
+| Scope enforcement mode | string | `enforce` | Controls the scope check the MCP gateway's `register_target` tool runs before registering a target (the old `PreToolUse` scope-enforcement hook that used to do this has been retired). `enforce` denies out-of-scope targets and asks about unlisted ones; `warn` never blocks, it just logs what it would have done to the session's `logs/scope-enforcement.log`; `off` skips the check entirely |
+| Calibration minimum sample size | number | `5` | Minimum recorded attempts a service/technique needs (across all your sessions) before `htb-decision-tree` reports a measured success rate for it instead of the honest heuristic fallback. Lower values surface real data sooner but with wider statistical uncertainty |
 
 None of these are secrets, so they're stored in plain text in your own `~/.claude/settings.json` (never in the project you happen to be running Claude Code from). To change them later, use the `/plugin` interface or re-run the enable-time prompt.
 
@@ -661,8 +664,10 @@ The `/pentest` command allows specific tools. To see what's allowed:
 
 ```yaml
 # From pentest.md frontmatter
-allowed-tools: Bash(nmap:*), Bash(sqlmap:*), Bash(hydra:*), ...
+allowed-tools: mcp__plugin_clicky_clicky-gateway__register_target, mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__write_file, mcp__plugin_clicky_clicky-gateway__search_files, Task, TodoWrite
 ```
+
+Neither `/pentest` nor any of the 10 agents it dispatches has a direct `Bash`/`Read`/`Write`/`Grep`/`WebFetch` grant anymore - every action, including the orchestrating command's own session/scope bookkeeping, goes through the Clicky MCP gateway's tools instead (see `skills/mcp-gateway/SKILL.md`). `execute_command` is what actually runs `nmap`/`sqlmap`/`hydra`/etc. underneath, resolving `TARGET_n`-style tokens to real values first.
 
 ### Extending Clicky
 

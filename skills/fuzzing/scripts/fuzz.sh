@@ -329,7 +329,13 @@ print(json.dumps(out))
     fi
 
     if [ -z "$tool_used" ] && command -v gobuster >/dev/null 2>&1; then
-        gobuster vhost -u "$url" -w "$wordlist" -q -o "$work/gobuster.txt" >"$work/gobuster.stdout" 2>"$work/gobuster.stderr" || true
+        local args=(vhost -u "$url" -w "$wordlist" -q -o "$work/gobuster.txt")
+        local hi=0
+        while [ $hi -lt "${#AUTH_ARGS[@]}" ]; do
+            [ "${AUTH_ARGS[$hi]}" = "-H" ] && args+=(-H "${AUTH_ARGS[$((hi+1))]}")
+            hi=$((hi+2))
+        done
+        gobuster "${args[@]}" >"$work/gobuster.stdout" 2>"$work/gobuster.stderr" || true
         if [ -s "$work/gobuster.txt" ]; then
             tool_used="gobuster"
             hits_json=$(python3 -c '
@@ -458,13 +464,17 @@ auth_args = sys.argv[4:]
 out = []
 with open(wordlist) as f:
     words = [w.strip() for w in f if w.strip()]
-# Baseline: a nonsense param name, to compare response size against.
+# Baseline: a nonsense param name, to compare each candidate response
+# status AND size against - a genuinely recognized param usually differs
+# from "param not recognized" in one or both (matches the differential
+# detection described in skills/fuzzing/SKILL.md).
 baseline_cmd = ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{size_download}", "--max-time", "5"] + auth_args + [f"{url}{sep}__clicky_baseline_nonexistent=1"]
 try:
     r = subprocess.run(baseline_cmd, capture_output=True, text=True, timeout=10)
-    baseline_size = int(r.stdout.strip().split()[1])
+    base_parts = r.stdout.strip().split()
+    baseline_status, baseline_size = int(base_parts[0]), int(base_parts[1])
 except Exception:
-    baseline_size = -1
+    baseline_status, baseline_size = -1, -1
 for w in words:
     target = f"{url}{sep}{w}=test"
     cmd = ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{size_download}", "--max-time", "5"] + auth_args + [target]
@@ -473,7 +483,7 @@ for w in words:
         parts = result.stdout.strip().split()
         if len(parts) == 2:
             status, size = int(parts[0]), int(parts[1])
-            if status != 0 and size != baseline_size:
+            if status != 0 and (status != baseline_status or size != baseline_size):
                 out.append({"value": w, "status": status, "size": size})
     except Exception:
         continue

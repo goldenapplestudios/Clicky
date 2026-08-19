@@ -1,0 +1,7 @@
+{
+  "findings": [
+    {"id": "finding-1", "severity": "CRITICAL", "source_agent": "exploit-agent"},
+    {"id": "finding-2", "severity": "HIGH", "source_agent": "loot-agent"},
+    {"id": "finding-3", "severity": "MEDIUM", "source_agent": "exploit-agent"}
+  ]
+}

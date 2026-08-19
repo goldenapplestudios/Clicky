@@ -1,0 +1,15 @@
+# Pinned to mcp==2.0.0 (not the mcp>=1.29,<2 fallback the plan allowed for).
+# Verified in this environment on 2026-08-15: `pip index versions mcp` shows
+# 2.0.0 as the current latest release, and `pip install mcp==2.0.0` into a
+# clean venv resolves and installs cleanly (~60s, no dependency conflicts,
+# no build errors) - see skills/mcp-gateway/SKILL.md's Verification section
+# for the exact commands/output. No installation problems were hit, so
+# there's no reason to fall back to the older 1.x line.
+#
+# Transitive dependencies worth knowing about (installed automatically, not
+# pinned here): httpx2 (mcp's own HTTP client dependency - server.py reuses
+# it for fetch_url instead of adding a separate httpx/requests pin) and
+# mcp-types, anyio, pydantic, starlette, uvicorn, sse-starlette, and others
+# needed for the transport/auth machinery this gateway doesn't use (stdio
+# transport only) but that ship as part of the `mcp` package regardless.
+mcp==2.0.0

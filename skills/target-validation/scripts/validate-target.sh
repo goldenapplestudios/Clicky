@@ -73,6 +73,58 @@ is_private_ip() {
     return 1
 }
 
+# Function to check if target is merely SHAPED like an IP range
+# ("N.N.N.N-N" - digits/dots then a hyphen then digits), independent of
+# whether the numbers involved are actually valid. Used as a gate to keep
+# ANY range-shaped input (even a malformed one, e.g. "127.0.0.1-999" with
+# an out-of-bounds end octet) out of the hostname fallback below - see
+# validate_ip_range() for why that matters.
+looks_like_ip_range() {
+    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}$'
+}
+
+# Function to check if target is a well-formed IP range like
+# "10.10.10.1-254" (dotted-quad base address, valid octets, then "-" and a
+# 0-255 end-of-range number for the last octet). Must be checked BEFORE
+# validate_hostname: the hostname regex's per-label hyphen handling would
+# otherwise happily accept the "1-254" tail as a normal hostname label and
+# misclassify the whole range as VALID_HOSTNAME, skipping
+# is_dangerous_ip()/is_private_ip() entirely. Callers must also gate on
+# looks_like_ip_range() directly (not just call this and fall through to
+# validate_hostname on failure) so a *malformed* range with a dangerous
+# base (e.g. "127.0.0.1-999") doesn't slip through the same way.
+validate_ip_range() {
+    local target=$1
+
+    if ! looks_like_ip_range "$target"; then
+        return 1
+    fi
+
+    local base_ip="${target%-*}"
+    local range_end="${target##*-}"
+
+    if ! validate_ip "$base_ip"; then
+        return 1
+    fi
+
+    if [ "$range_end" -gt 255 ] || [ "$range_end" -lt 0 ]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Function to check if target is merely SHAPED like an IPv4 address (four
+# purely-numeric dot-separated groups), independent of whether the octets
+# are actually in the valid 0-255 range. Used as a gate to keep an
+# out-of-range dotted-quad input (e.g. "300.300.300.300", which validate_ip
+# already rejected) from falling through to validate_hostname, whose regex
+# is permissive enough to accept a numeric-only dotted string as a
+# "hostname" and misclassify a malformed IP as VALID_HOSTNAME.
+looks_like_ipv4() {
+    echo "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
 # Function to validate hostname
 validate_hostname() {
     local hostname=$1
@@ -97,23 +149,28 @@ validate_hostname() {
     return 0
 }
 
-# Main validation
-main() {
-    local target="${1:-}"
-
-    if [ -z "$target" ]; then
-        echo "ERROR: No target provided"
-        exit 1
-    fi
+# Validate a single target (no comma-splitting). Prints one of
+# VALID_IP / VALID_RANGE / VALID_CIDR / VALID_HOSTNAME (optionally preceded
+# by a WARNING line for private IPs/ranges, which is not itself a failure),
+# or an ERROR line, and returns 0/1 accordingly. Does not exit - callers
+# (main, and the comma-separated-list loop below) decide what to do with
+# the result so one bad target in a list doesn't short-circuit the rest.
+validate_single_target() {
+    local target="$1"
 
     # Remove any shell metacharacters for safety
     target=$(echo "$target" | sed 's/[;&|`$()<>]//g')
+
+    if [ -z "$target" ]; then
+        echo "ERROR: Empty target"
+        return 1
+    fi
 
     # Check if it's an IP address
     if validate_ip "$target"; then
         # It's a valid IP, check if dangerous
         if is_dangerous_ip "$target"; then
-            exit 1
+            return 1
         fi
 
         # Warn about private IPs
@@ -122,34 +179,107 @@ main() {
         fi
 
         echo "VALID_IP: $target"
-        exit 0
+        return 0
+    fi
+
+    # Check if it's range-shaped (e.g. 10.10.10.1-254) - this whole branch,
+    # not just the valid case, must run before the hostname check below
+    # (F4): any input shaped like an IP range is handled and returned on
+    # here, valid or not, so a malformed range (e.g. bad octet, or an
+    # out-of-bounds "127.0.0.1-999") can never fall through to
+    # validate_hostname and get silently accepted as VALID_HOSTNAME,
+    # bypassing is_dangerous_ip()/is_private_ip().
+    if looks_like_ip_range "$target"; then
+        if ! validate_ip_range "$target"; then
+            echo "ERROR: Invalid IP range format: $target"
+            return 1
+        fi
+
+        local base_ip="${target%-*}"
+
+        if is_dangerous_ip "$base_ip"; then
+            return 1
+        fi
+
+        if is_private_ip "$base_ip"; then
+            echo "WARNING: Targeting private IP range: $target"
+        fi
+
+        echo "VALID_RANGE: $target"
+        return 0
+    fi
+
+    # Reject dotted-quad-shaped input that validate_ip already rejected
+    # (e.g. "300.300.300.300" - out-of-range octet) before it can reach
+    # validate_hostname, whose regex would otherwise accept a numeric-only
+    # dotted string as a valid hostname (see looks_like_ipv4).
+    if looks_like_ipv4 "$target"; then
+        echo "ERROR: Invalid IP address format: $target"
+        return 1
     fi
 
     # Check if it's a hostname
     if validate_hostname "$target"; then
         echo "VALID_HOSTNAME: $target"
-        exit 0
+        return 0
     fi
 
     # Check if it's a CIDR range
     if echo "$target" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$'; then
         # Extract the IP part
+        local ip_part cidr_part
         ip_part=$(echo "$target" | cut -d'/' -f1)
         cidr_part=$(echo "$target" | cut -d'/' -f2)
 
         if validate_ip "$ip_part" && [ "$cidr_part" -ge 0 ] && [ "$cidr_part" -le 32 ]; then
             # Check if the base IP is dangerous
             if is_dangerous_ip "$ip_part"; then
-                exit 1
+                return 1
             fi
 
             echo "VALID_CIDR: $target"
-            exit 0
+            return 0
         fi
     fi
 
     echo "ERROR: Invalid target format: $target"
-    exit 1
+    return 1
+}
+
+# Main entry point. A single target is validated directly; a
+# comma-separated list ("10.10.10.10,10.10.10.11,dc01") is split and each
+# target validated independently via validate_single_target, failing the
+# whole call if any single target in the list fails (L15).
+main() {
+    local input="${1:-}"
+
+    if [ -z "$input" ]; then
+        echo "ERROR: No target provided"
+        exit 1
+    fi
+
+    if [[ "$input" == *,* ]]; then
+        local overall_status=0
+        local raw_target target
+        IFS=',' read -r -a targets <<< "$input"
+        for raw_target in "${targets[@]}"; do
+            # Trim surrounding whitespace (e.g. "a, b, c")
+            target=$(echo "$raw_target" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ -z "$target" ]; then
+                echo "ERROR: Empty target in list: $input"
+                overall_status=1
+                continue
+            fi
+            validate_single_target "$target" || overall_status=1
+        done
+        exit "$overall_status"
+    fi
+
+    if validate_single_target "$input"; then
+        exit 0
+    else
+        exit 1
+    fi
 }
 
 # Run main function

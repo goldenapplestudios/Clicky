@@ -3,9 +3,10 @@
 # Persistent State Management for Pentest Sessions
 #
 # record_attempt/check_failed_attempt/get_session_summary are session-scoped
-# (write into $SESSION_DIR/logs/attempts.jsonl, same convention as
-# trace-logger.sh's trace log and session-manager.sh's findings.json) - NOT
-# a global cross-session store. This is a rewrite: the previous version
+# (write into $SESSION_DIR/logs/attempts.jsonl, same convention as the
+# gateway's own logs/trace.jsonl - see skills/mcp-gateway/server.py's
+# _trace() - and session-manager.sh's findings.json) - NOT a global
+# cross-session store. This is a rewrite: the previous version
 # wrote to a single global ~/.claude/pentest-state/attack-history.json
 # keyed by session_id internally, inconsistent with every other piece of
 # session state in this codebase, and it meant check_failed_attempt could

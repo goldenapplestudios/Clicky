@@ -109,6 +109,15 @@ PASS=.*
 # Store discovered credentials
 ${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh store "{username}" "{password}" "{hash}" "{service}" "{source}"
 
+# Store with the target host and an explicit hash type (both optional trailing flags)
+${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh store \
+  "{username}" "{password}" "{hash}" "{service}" "{source}" \
+  --target "{ip_address}" --hash-type "{hash_type}"
+
+# If a hash is stored and --hash-type is omitted, credential-manager.sh
+# automatically shells out to hash-identifier.py and stores its best-guess
+# type instead of leaving hash_type null
+
 # Retrieve credentials
 ${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh get --service ssh
 ${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh get --username admin
@@ -348,7 +357,7 @@ set PASS_FILE passwords.txt
 ```bash
 # Store credentials in the structured credential store for this engagement
 ${CLAUDE_PLUGIN_ROOT}/skills/credential-harvesting/scripts/credential-manager.sh store \
-  "{username}" "{password}" "{hash}" "{service}" "{source}"
+  "{username}" "{password}" "{hash}" "{service}" "{source}" --target "{target_ip}"
 
 # Also record the discovery as a state-persistence "credentials" discovery so
 # decision-agent's check-failed logic and cross-session learning can see it
