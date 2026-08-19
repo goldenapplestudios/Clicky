@@ -22,7 +22,8 @@ flowchart LR
     D --> V[Verification Agent]
     E --> V
     F --> V
-    V --> G[Report]
+    V --> G[Report Agent]
+    G --> Z[Severity Analyst Agent]
 
     D -.->|failure| C
     E -.->|failure| C
@@ -147,7 +148,7 @@ Clicky/
 
 ## Core Components
 
-### Agents (9)
+### Agents (10)
 
 Agents are defined in `agents/` as markdown files with YAML frontmatter specifying model, tools, and skills. Every agent's `tools:` list is exclusively `mcp__plugin_clicky_clicky-gateway__*` gateway tools - no agent holds a direct Bash/Read/Write/Glob/Grep grant (see [Architecture](docs/architecture.md#security-model)).
 
@@ -160,6 +161,7 @@ Agents are defined in `agents/` as markdown files with YAML frontmatter specifyi
 - **source-analyzer-agent**: White-box source-code analysis - source-to-sink mapping and vulnerable dependencies, feeding decision-agent as a parallel input (see [Agents](docs/agents.md#source-analyzer-agent))
 - **verification-agent**: Independently re-checks CRITICAL/HIGH findings against raw trace evidence before they reach the report (see [Agents](docs/agents.md#verification-agent))
 - **report-agent**: Synthesizes already-validated session findings into the final client-facing report - CVSS/OWASP/CIS/NIST framework mapping, risk matrix, and narrative - replacing direct `report-generator.sh` invocation from the orchestrator (see [Agents](docs/agents.md#report-agent))
+- **severity-analyst-agent**: Adversarial senior-analyst review of the drafted report's severity/impact scoring - kill-mandate critique across every finding together, cross-model-family by default, producing per-finding deltas and a report-level slop score that feeds a real calibration loop back into report-agent (see [Agents](docs/agents.md#severity-analyst-agent))
 
 ### Commands
 

@@ -16,7 +16,8 @@
 8. [Source Analyzer Agent](#source-analyzer-agent)
 9. [Verification Agent](#verification-agent)
 10. [Report Agent](#report-agent)
-11. [Agent Interaction Patterns](#agent-interaction-patterns)
+11. [Severity Analyst Agent](#severity-analyst-agent)
+12. [Agent Interaction Patterns](#agent-interaction-patterns)
 
 ---
 
@@ -87,6 +88,10 @@ flowchart LR
         REPORT["Report Agent"]
     end
 
+    subgraph SeverityReview["Phase 8: Severity Review"]
+        SEVERITY["Severity Analyst Agent"]
+    end
+
     SRC --> DECISION
     RECON --> DECISION
     CLOUD --> DECISION
@@ -99,6 +104,7 @@ flowchart LR
     LOOT --> VERIFY
     CLOUD --> VERIFY
     VERIFY --> REPORT
+    REPORT --> SEVERITY
 ```
 
 ---
@@ -1261,6 +1267,8 @@ flowchart LR
 
 It is deliberately given only the finding's severity, description, evidence command, and the raw trace entry - never the originating agent's confidence rating or reasoning, to avoid anchoring on someone else's framing. Its tools are limited to the gateway's `execute_command`, `read_file`, and `search_files` - no write/register/fetch capability, no `Task` - so it can judge and minimally re-verify, but never "fix" a finding or spawn further agents.
 
+Tier 2 only answers whether a finding is *true*. Whether a true finding's *severity* is proportionate to real-world risk is a separate question, answered downstream of `report-agent` by [Severity Analyst Agent](#severity-analyst-agent) (Tier 3) - see that section below.
+
 ### Why `inconclusive` Is a Real Answer
 
 The agent is explicitly instructed not to default to `confirmed` when in doubt: if a re-attempt isn't safe (destructive, non-idempotent, or access has since been lost), it says so rather than guessing. Any CRITICAL/HIGH finding that comes back `refuted`, or that Tier 1 flagged as `fail`, is a hard gate in `report-generator.sh validate` - it cannot appear in the report's "Confirmed Findings" section.
@@ -1300,6 +1308,51 @@ The Report Agent has no `Task` tool and is never given raw trace evidence the wa
 ### Scope Boundary
 
 The Report Agent wires into `commands/pentest.md` only. `workflows/pentest-parallel.js`'s dynamic-workflow stages have no confirmed mechanism to reference an `agents/*.md` file by name - its own `verification` stage already works around this by inlining a condensed charter rather than dispatching `verification-agent` via `Task`, and its reporting stage follows that same pre-existing pattern. That's a constraint of the parallel workflow engine, not something this agent changes.
+
+Report Agent is no longer the last thing that touches a session before it's considered complete: `commands/pentest.md` Step 11 dispatches [Severity Analyst Agent](#severity-analyst-agent) against the report this agent just drafted, before the engagement is considered done.
+
+---
+
+## Severity Analyst Agent
+
+### Purpose
+
+Tier 1 and Tier 2 both answer "is this finding true?" Neither ever asks "is the severity assigned to a true finding proportionate to real-world risk?" - an honestly-confirmed self-XSS reported as CRITICAL passes both cleanly and still misleads a client. This is a real, measured, industry-wide failure mode in AI-generated pentest reporting, not a hypothetical one (see `agents/severity-analyst-agent.md`'s "Why This Exists" for the research citations). The Severity Analyst Agent is Tier 3: an adversarial senior-analyst pass over the *whole drafted report* - not one finding at a time - specifically hunting for inflated severity, with a report-level "slop score" quantifying how much it found.
+
+### Why Cross-Model-Family, By Default
+
+The research this design is based on ("Refute-or-Promote," a real adversarial multi-agent review campaign) found that naively adding an adversarial reviewer isn't enough by itself: in one documented case, 80+ agents - including agents explicitly tasked with adversarial review - unanimously endorsed a vulnerability that didn't exist, because same-model-family reviewers share correlated blind spots that get *worse* with capability, not better. So this agent is dispatched two different ways depending on what's available:
+
+```mermaid
+flowchart TD
+    DRAFT["report-agent drafts<br/>final_report.md"] --> CHECK{"codex CLI<br/>installed?"}
+    CHECK -->|Yes| CROSS["tools/run-severity-critique.sh:<br/>codex exec, no MCP tools needed<br/>(report is already redacted text)"]
+    CHECK -->|No| SAME["Task-dispatch severity-analyst-agent<br/>as an ordinary same-family subagent"]
+    CROSS --> OUT["severity_critique.json<br/>review_mode: cross_family_codex"]
+    SAME --> OUT2["severity_critique.json<br/>review_mode: same_family_fallback"]
+```
+
+The cross-family path needs no gateway/MCP access at all - by the time report-agent has drafted a report, its content is already redacted/tokenized, so it's safe to hand directly to an external model with zero target/credential exposure. The same-family fallback is still useful (the kill-mandate/cold-start framing below does real work on its own), just a weaker calibration signal - which is why every review is tagged with which path produced it, rather than blending both into one number.
+
+### Kill Mandate, With a Counterweight
+
+Unlike Tier 2's "confirmed/refuted/inconclusive" framing, this agent's default posture is explicitly prosecutorial: find every reason a severity claim is unsupported, not "double-check it looks reasonable." It checks for Base-score-only scoring (ignoring compensating controls and realistic preconditions), unevidenced "could-chains" stacked into a certain-sounding outcome, and business-impact language stronger than what was actually demonstrated. The counterweight, because a purely downgrade-seeking reviewer creates its own failure mode (research on this exact problem found a false-positive-optimized critic suppressed over 20% of *genuinely real* findings in its best configuration): it's also instructed to flag under-scored findings, not just over-scored ones.
+
+### The Slop Score
+
+A 0-100 report-level score, weighted so that inflating the top of the severity scale (CRITICAL → MEDIUM) counts far more than inflating the bottom (MEDIUM → LOW) - see `agents/severity-analyst-agent.md`'s exact formula. Documented there as a tunable first pass, not a fixed law, meant to be revisited against real accumulated calibration data the same way every other heuristic in Clicky already is.
+
+### The Feedback Loop
+
+This is what makes Tier 3 a calibration mechanism, not a one-off critique. Every finding's delta is logged (`skills/session-management/scripts/severity-review-logger.sh`) to that session's `logs/severity_review.jsonl`, then aggregated across every session (`skills/session-management/scripts/severity-calibration-aggregator.sh`) into `.severity-calibration.json` - structurally identical to how `attempt-aggregator.sh` already computes real per-service success rates for `skills/htb-decision-tree` (same min-sample-size floor, same "insufficient_data" honesty over a misleadingly precise number). `report-agent` reads this file back on future engagements to flag categories it has historically over-scored - the actual mechanism that tunes the *reporting* agent's own judgment over time, not just this reviewing one.
+
+### What It Never Does
+
+Same restricted-reviewer posture as Verification Agent, one level further: no `write_file` (it argues its case in `rationale`, it doesn't rewrite anything), no `execute_command` at all (unlike Tier 2, nothing here is ever re-run live - it only reads already-drafted text and already-validated JSON), no `Task` tool. Its recommendation is surfaced in the report as a visible "Independent Severity Review" section, never silently substituted for the original severities - the same transparency principle the existing "Unverified / Needs Manual Review" section already uses. An operator who disagrees with it is allowed to.
+
+### Scope Boundary
+
+Wires into `commands/pentest.md` Step 11 only, same constraint as Report Agent - `workflows/pentest-parallel.js` has no confirmed mechanism to invoke it yet.
 
 ---
 

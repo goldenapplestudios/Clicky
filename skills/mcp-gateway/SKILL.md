@@ -6,19 +6,20 @@ allowed-tools: Bash, Read
 
 # MCP Gateway Skill
 
-## Status: registered, running, and adopted by all 9 agents
+## Status: registered, running, and adopted by all 10 agents
 
 This server is fully wired in: `.claude-plugin/plugin.json`'s `mcpServers`
 block registers it as `clicky-gateway`, launched via `scripts/launch.sh`
 (see below), and `hooks/hooks.json` has a `SessionStart` entry that also
 runs `scripts/provision-venv.sh` at the start of every session. Claude Code
 therefore actually launches this server and its `initialize`/`tools/list`
-handshake succeeds. All 9 `agents/*.md` files (`recon`, `decision`,
+handshake succeeds. All 10 `agents/*.md` files (`recon`, `decision`,
 `exploit`, `privesc`, `loot`, `cloud-recon`, `source-analyzer`,
-`verification`, `report`) have had their `tools:` frontmatter rewritten to
-grant exclusively these 7 `mcp__plugin_clicky_clicky-gateway__*` tools in
-place of direct Bash/Read/Write/WebFetch - zero direct tool grants remain
-anywhere in the plugin. (The original scope-enforcement `PreToolUse` hook,
+`verification`, `report`, `severity-analyst`) have had their `tools:`
+frontmatter rewritten to grant exclusively a subset of
+`mcp__plugin_clicky_clicky-gateway__*` tools in place of direct
+Bash/Read/Write/WebFetch - zero direct tool grants remain anywhere in the
+plugin. (The original scope-enforcement `PreToolUse` hook,
 `skills/target-validation/scripts/scope-enforcement-hook.sh`, has also been
 retired, in favor of `register_target`'s own scope check below - see
 `skills/target-validation/SKILL.md`'s "Automatic Scope Enforcement" section
@@ -50,9 +51,9 @@ where it does finish first.
 Previously, Clicky's agents called Bash/WebFetch/Read directly, so raw
 target IPs, hostnames, and discovered credentials flowed to the model as
 plain tool-call/tool-result content for the whole engagement. This skill is
-the gateway architecture that fixed that: all 9 agents have lost their
-direct Bash/Read/Write/WebFetch grants and instead call the 7 MCP tools
-`server.py` exposes here. Each tool resolves placeholder tokens
+the gateway architecture that fixed that: all 10 agents have lost their
+direct Bash/Read/Write/WebFetch grants and instead call a subset of the MCP
+tools `server.py` exposes here. Each tool resolves placeholder tokens
 (`TARGET_1`, `CRED_HASH_1`, etc.) to real values before acting, and redacts
 real values back to tokens in whatever it returns - so the model only ever
 sees tokens in either direction, while the actual command execution, file

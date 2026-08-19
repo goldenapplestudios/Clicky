@@ -6,7 +6,7 @@ Why this exists: Clicky is built as a Claude Code plugin, but its actual
 attack logic (agent prompts, skill content, the MCP gateway) is
 substrate-neutral - the MCP privacy gateway is a standard MCP server, and
 OpenCode/Codex CLI/Copilot CLI all have their own native agent/MCP/skill
-systems. Rather than maintain N parallel copies of 9 agents by hand, this
+systems. Rather than maintain N parallel copies of 10 agents by hand, this
 script reads Claude Code's `agents/*.md`/`commands/*.md` as the single
 source of truth and generates thin, per-CLI artifacts - the same pattern
 `NeoTheCapt/RedteamAgent` uses for its own Claude Code/OpenCode/Codex
@@ -970,7 +970,7 @@ def generate_codex(out_dir: Path) -> dict[Path, str]:
 #     analogous to Codex's #32101 - no model is pinned here, matching
 #     OpenCode's approach of leaving model selection to the caller's
 #     default, with an optional per-agent override path documented.
-#   - `user-invocable: false` is set on the 9 leaf agents per the
+#   - `user-invocable: false` is set on the 10 leaf agents per the
 #     original docs-only research (a field controlling whether the
 #     model can autonomously self-select an agent, distinct from the
 #     `tools:` restriction) - NOT independently re-verified live in this
@@ -1082,7 +1082,7 @@ def generate_copilot_orchestrator_agent() -> str:
         "'primary agent' concept the way OpenCode has - this agent IS the "
         "entry point, invoked directly via `--agent pentest-orchestrator` "
         "(see tools/run-clicky-copilot-agent.sh). It's granted `task` in "
-        "addition to clicky-gateway so it can delegate to the 9 leaf agents "
+        "addition to clicky-gateway so it can delegate to the 10 leaf agents "
         "- confirmed live that a top-level agent with `tools: ['task', "
         "'clicky-gateway']` can successfully delegate to a separately-"
         "defined named agent, which then uses its own independent gateway "

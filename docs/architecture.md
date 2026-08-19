@@ -331,7 +331,7 @@ What *is* real, and still useful for reading each agent's output, is how determi
 | Cloud Recon | Structured, low-judgment | Same shape as Recon, applied to cloud provider APIs |
 | Source Analyzer | Structured, precise | Static-analysis output mapped to a fixed schema |
 
-None of this is enforced by a model or temperature setting - `model: inherit` means all 8 agents share whatever model the orchestrator is running under.
+None of this is enforced by a model or temperature setting - `model: inherit` means all 10 agents share whatever model the orchestrator is running under.
 
 ### Directory Structure Explained
 
