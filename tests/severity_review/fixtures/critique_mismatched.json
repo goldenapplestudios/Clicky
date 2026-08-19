@@ -1,0 +1,38 @@
+{
+  "slop_score": 99,
+  "review_summary": "test critique with a deliberately wrong self-reported slop_score",
+  "flags": {
+    "unsubstantiated_impact_language": 1,
+    "ignored_compensating_controls": 0,
+    "unresolved_could_chains": 1
+  },
+  "findings": [
+    {
+      "finding_id": "finding-1",
+      "original_severity": "CRITICAL",
+      "original_cvss": 9.8,
+      "recommended_severity": "MEDIUM",
+      "recommended_cvss": 5.0,
+      "direction": "downgrade",
+      "rationale": "test"
+    },
+    {
+      "finding_id": "finding-2",
+      "original_severity": "HIGH",
+      "original_cvss": 7.5,
+      "recommended_severity": "HIGH",
+      "recommended_cvss": 7.5,
+      "direction": "unchanged",
+      "rationale": "test"
+    },
+    {
+      "finding_id": "finding-3",
+      "original_severity": "MEDIUM",
+      "original_cvss": 5.0,
+      "recommended_severity": "LOW",
+      "recommended_cvss": 3.0,
+      "direction": "downgrade",
+      "rationale": "test"
+    }
+  ]
+}

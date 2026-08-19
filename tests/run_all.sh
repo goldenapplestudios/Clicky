@@ -39,6 +39,8 @@ fi
 
 run "finding-validator Tier 1 trace cross-check (fixtures)" "$HERE/finding_validator/test_finding_validator.sh"
 run "attempt-aggregator calibration (fixtures)" "$HERE/calibration/test_calibrate_success_rates.sh"
+run "severity-review-logger mechanical slop_score recomputation (fixtures)" "$HERE/severity_review/test_severity_review_logger.sh"
+run "severity-calibration-aggregator (fixtures)" "$HERE/severity_calibration/test_severity_calibration_aggregator.sh"
 run "tls-scan.sh (real self-signed server + testssl/sslscan/nmap fixtures)" "$HERE/tls_scan/test_tls_scan.sh"
 run "security-headers-check.sh (real mock HTTP server)" "$HERE/security_headers/test_security_headers_check.sh"
 run "mcp-gateway suite (token_store/scope_gate/provision-venv/launch.sh + live MCP protocol check)" "$HERE/mcp_gateway/run_tests.sh"
