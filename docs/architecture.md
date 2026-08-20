@@ -664,13 +664,18 @@ Clicky doesn't ship a custom `settings.json`. Configurable values are declared a
   "default_username_wordlist": { "type": "file", ... },
   "max_parallel_operations": { "type": "number", "default": 3, "min": 1, "max": 16 },
   "require_confirmation_before_exploitation": { "type": "boolean", "default": false },
-  "default_session_directory": { "type": "directory", ... }
+  "default_session_directory": { "type": "directory", ... },
+  "tool_provisioning": { "type": "string", "default": "none" }
 }
 ```
 
-Non-sensitive values land in `pluginConfigs` in your own `~/.claude/settings.json` (never in the project's, so a cloned copy of this repo can't smuggle in different values) and are available to Clicky's commands, agents, and skills as `${user_config.<key>}` substitutions, or as `CLAUDE_PLUGIN_OPTION_<KEY>` environment variables inside hook processes. `max_parallel_operations` only affects `/clicky:pentest-parallel` (the dynamic-workflow entry point); `require_confirmation_before_exploitation` only affects `/clicky:pentest` (the prose entry point), since a running workflow can't pause for input. See [Usage](usage.md) for the full list of options and their defaults.
+Non-sensitive values land at `pluginConfigs.clicky.options.<key>` in your own `~/.claude/settings.json` (never in the project's, so a cloned copy of this repo can't smuggle in different values — confirmed against Claude Code's own plugin reference docs, which also confirm `${user_config.*}` template substitution is deliberately blocked in anything that runs in a shell, precisely to prevent shell injection via a configured value; the real, used mechanism throughout this repo is `CLAUDE_PLUGIN_OPTION_<KEY>` environment variables, available to hook and MCP-server processes). `max_parallel_operations` only affects `/clicky:pentest-parallel` (the dynamic-workflow entry point); `require_confirmation_before_exploitation` only affects `/clicky:pentest` (the prose entry point), since a running workflow can't pause for input. See [Usage](usage.md) for the full list of options and their defaults.
 
 Everything else this section used to describe — timeouts, per-agent temperature, scan speed, safety toggles — was never real: it was aspirational documentation for a `settings.json` that nothing in this repo has ever read. It's been removed rather than reintroduced, since the platform has no supported way to ship that sprawl of invented config through a plugin.
+
+### Beyond Claude Code: `~/.clicky/config.json` and the setup wizard
+
+`userConfig` only exists for Claude Code — Clicky's other three supported hosts (OpenCode, Codex CLI, Copilot CLI) have no equivalent built-in mechanism at all, confirmed by reading `tools/generate-cli-targets.py`'s own env-injection code: only `CLAUDE_PLUGIN_ROOT` is ever propagated into their generated configs, none of the `CLAUDE_PLUGIN_OPTION_*` values above. `~/.clicky/config.json` closes that gap: a single, CLI-neutral file holding the same keys as `userConfig`, read directly by `skills/mcp-gateway/scripts/launch.sh` (the one physical MCP-server entry point all four hosts already point at) whenever a host hasn't already set a given `CLAUDE_PLUGIN_OPTION_<KEY>` natively — a host's own native value always wins. `tools/clicky-setup.sh` is the wizard that writes it, plus real environment detection (is Nix/Kalilix/Codex CLI actually installed and working) `userConfig`'s own prompt can't do — see [Usage → Setup Wizard](usage.md#setup-wizard) for the full flow.
 
 ---
 

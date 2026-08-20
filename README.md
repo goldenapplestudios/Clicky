@@ -75,6 +75,16 @@ Also generated for [GitHub Copilot CLI](https://docs.github.com/en/copilot/conce
 
 Each generated agent embeds its own MCP server registration directly in its frontmatter rather than relying on a shared workspace `.mcp.json` - confirmed live that workspace-level MCP config is currently broken in Copilot CLI (`github/copilot-cli#3126`, open) and never actually reaches the model, even though it registers without error. Skills are exposed via a `.claude/skills -> ../skills` symlink, which Copilot CLI reads natively. See `tools/generate-cli-targets.py`'s Copilot section doc comment for the full verification record, including a real adversarial shell-denial test and a real orchestrator-to-leaf-agent delegation via Copilot's `task` tool.
 
+### Setup Wizard
+
+Before your first scan, run the setup wizard - detects your environment, offers to install [Nix](https://lix.systems/) so agents get a real, reproducible 33-tool pentest toolkit via [Kalilix](https://github.com/scopecreep-zip/kalilix) (nmap, sqlmap, hydra, metasploit, and more - no manual installs), offers to install Codex CLI so `severity-analyst-agent`'s report review runs cross-provider instead of reviewing itself, then configures whichever of the 4 CLI hosts above you actually have installed - all from one file (`~/.clicky/config.json`), one run:
+
+```bash
+tools/clicky-setup.sh
+```
+
+Never runs a consequential system-level install (Nix, Codex CLI) without showing you the exact command first and asking. See [Usage → Setup Wizard](docs/usage.md#setup-wizard) for the full flow, including `--advanced` (assign specific agents to specific AI frameworks/models).
+
 ## Quick Start
 
 ```bash

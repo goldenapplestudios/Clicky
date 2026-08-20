@@ -105,8 +105,31 @@ When you install Clicky (`/plugin install clicky@clicky`) or reload it after a l
 | Default session/output directory | directory | `~/.claude/sessions` | Where session data, loot, and reports are written |
 | Scope enforcement mode | string | `enforce` | Controls the scope check the MCP gateway's `register_target` tool runs before registering a target (the old `PreToolUse` scope-enforcement hook that used to do this has been retired). `enforce` denies out-of-scope targets and asks about unlisted ones; `warn` never blocks, it just logs what it would have done to the session's `logs/scope-enforcement.log`; `off` skips the check entirely |
 | Calibration minimum sample size | number | `5` | Minimum recorded attempts a service/technique needs (across all your sessions) before `htb-decision-tree` reports a measured success rate for it instead of the honest heuristic fallback. Lower values surface real data sooner but with wider statistical uncertainty |
+| Tool provisioning | string | `none` | `none`: agents use whatever's already on your `PATH`. `kalilix`: real pentest tools (nmap, sqlmap, hydra, and more) provided via [Kalilix](https://github.com/scopecreep-zip/kalilix), a Nix flake, no manual installs. See [Setup Wizard](#setup-wizard) below — this is the one setting worth using the wizard for rather than typing by hand |
 
-None of these are secrets, so they're stored in plain text in your own `~/.claude/settings.json` (never in the project you happen to be running Claude Code from). To change them later, use the `/plugin` interface or re-run the enable-time prompt.
+Non-sensitive values are stored at `pluginConfigs.clicky.options.<key>` in your own `~/.claude/settings.json` (never in the project you happen to be running Claude Code from) — confirmed against Claude Code's own plugin reference docs; an earlier revision of this page described the storage as one level shallower than it actually is. To change them later, use the `/plugin` interface or re-run the enable-time prompt — or see the wizard below, which covers more than Claude Code's own prompt does.
+
+### Setup Wizard
+
+Claude Code's own userConfig prompt (above) only exists for Claude Code — Clicky is multi-CLI (Claude Code, OpenCode, Codex CLI, Copilot CLI), and none of the other three hosts have an equivalent built-in mechanism. `tools/clicky-setup.sh` is a standalone wizard that covers all four, plus real environment detection Claude Code's own prompt can't do (whether Nix/Kalilix/Codex CLI are actually installed and working, not just what value you typed):
+
+```bash
+tools/clicky-setup.sh
+```
+
+Detects your environment, offers to install [Nix](https://lix.systems/) if you want Kalilix's pentest toolkit and Nix isn't present (shows the exact command first, asks for confirmation — never runs anything silently), offers to install Codex CLI if you want `severity-analyst-agent`'s cross-provider review and it isn't present (same explicit-confirmation posture), then writes `~/.clicky/config.json` — a single, CLI-neutral config file every one of the four supported hosts reads from (via `skills/mcp-gateway/scripts/launch.sh`, the one physical entry point they all share) — and syncs to whichever hosts it actually detects installed. Ends with one summary, not a trail of prompts along the way — those two installs are the only questions it asks; everything else is detected and applied automatically.
+
+Pure bash — no Python or other interpreter needed to run this default flow, deliberately: getting from "nothing installed" to "Clicky works" can't itself require an interpreter you might not have yet.
+
+Advanced: assign specific agents to specific AI frameworks/models (e.g. run `severity-analyst-agent` through Codex specifically, pin `decision-agent` to a stronger model) with:
+
+```bash
+tools/clicky-setup.sh --advanced
+```
+
+Needs Python 3 (unlike the default flow above) — it already needs `tools/generate-cli-targets.py` to apply Codex/OpenCode overrides, a fair ask for this specific, opt-in path. `tools/clicky-setup.sh --advanced` checks for it and says so plainly if missing, rather than failing unexplained.
+
+Supported for Codex CLI and OpenCode (real, verified per-agent model mechanisms) and Claude Code (via a generated `--agents`-flag wrapper script — not yet live-dispatch-tested against a real engagement, said plainly in the wizard's own output). Not supported for Copilot CLI — no confirmed per-agent model field exists for it yet.
 
 ---
 

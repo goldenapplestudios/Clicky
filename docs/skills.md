@@ -476,6 +476,8 @@ Tool availability and fallback.
 | sqlmap | SQLi | Manual injection |
 | hydra | Brute force | medusa, ncrack |
 
+`tool-check.sh` is Kalilix-aware: a missing tool that Kalilix's `#kali` devShell provides gets a hint pointing at `tools/clicky-setup.sh` (if `tool_provisioning` isn't already `kalilix`) instead of a generic `nix-shell -p` suggestion - see [Usage → Setup Wizard](usage.md#setup-wizard).
+
 ### report-generation
 
 Output and documentation.

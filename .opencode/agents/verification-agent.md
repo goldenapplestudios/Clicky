@@ -25,8 +25,8 @@ permission:
   model: inherit (Claude Code's frontmatter) has no direct OpenCode
   equivalent - omitted here, so this agent uses whatever model
   `opencode run -m <provider>/<model>` or the caller's own default
-  supplies. To pin a specific model for this agent, add a top-level
-  `model: <provider>/<model-id>` field to this file.
+  supplies. To pin a specific model for this agent, run
+  tools/clicky-setup.sh --advanced.
 
   Scoped to these skills in Claude Code (skills: frontmatter): session-management, target-validation, tool-management. OpenCode has no confirmed per-agent skill-allowlist mechanism -
   this agent's `skill` tool (left allowed, not in the deny list
