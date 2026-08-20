@@ -20,6 +20,12 @@
 # Codex integration (.codex/install.sh's MCP+prompt registration is
 # unnecessary here and deliberately skipped).
 #
+# Getting to "bare codex binary, authenticated": `python3 tools/clicky-
+# setup.py` (the setup wizard) has a dedicated step for exactly this -
+# offers to install Codex CLI if missing (with confirmation) and probes
+# whether it's actually authenticated, rather than leaving an operator to
+# discover the requirement only when this script's exit-2 fallback fires.
+#
 # Usage:
 #   tools/run-severity-critique.sh --report FILE --findings FILE
 #       [--calibration FILE] [--model MODEL] [--output FILE]
