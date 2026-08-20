@@ -64,6 +64,13 @@
       "default": 5,
       "min": 1,
       "max": 100
+    },
+    "tool_provisioning": {
+      "type": "string",
+      "title": "Tool provisioning",
+      "description": "'none' (default): agents use whatever pentest tools (nmap, sqlmap, hydra, etc.) are already on your PATH, same as always. 'kalilix': skills/mcp-gateway/scripts/launch.sh wraps the gateway server in `nix develop kalilix#kali`, a reproducible Nix flake (github.com/scopecreep-zip/kalilix) providing 32 real pentest tools with no manual installs. Requires Nix - run tools/clicky-setup.py to set this up (it can install Nix for you, with confirmation, and registers/pre-warms the Kalilix flake). Falls back silently to 'none' behavior if Nix or the flake isn't actually available, so this is always safe to leave set even before running the setup wizard.",
+      "default": "none",
+      "required": false
     }
   },
   "mcpServers": {
