@@ -47,5 +47,6 @@ run "mcp-gateway suite (token_store/scope_gate/provision-venv/launch.sh + live M
 run "OpenCode target generation (drift check + live permission-resolution check if opencode is installed)" "$HERE/cli_targets/test_opencode_generation.sh"
 run "Codex CLI target generation (drift check + TOML/structural validation)" "$HERE/cli_targets/test_codex_generation.sh"
 run "Copilot CLI target generation (drift check + frontmatter/structural validation)" "$HERE/cli_targets/test_copilot_generation.sh"
+run "clicky-setup.sh wizard (stubbed nix/codex/CLI binaries, no real system touched)" "$HERE/setup_wizard/test_clicky_setup.sh"
 
 exit $FAILED

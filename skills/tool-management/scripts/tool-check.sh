@@ -86,16 +86,64 @@ check_tool() {
     else
         echo -e "  ${RED}✗${NC} $tool - ${YELLOW}Alternatives: $alternatives${NC}"
 
-        # Check if available via nix
-        if command -v nix &> /dev/null; then
-            if nix-shell -p $tool --run "which $tool" &> /dev/null; then
-                echo -e "    ${BLUE}↳ Available via: nix-shell -p $tool${NC}"
+        # Kalilix-aware hint, not a generic "try nix-shell -p" suggestion -
+        # see the KALILIX_* variables set by check_kalilix() below, which
+        # runs once at the top of this script's main flow. This replaces
+        # what used to be a per-tool `nix-shell -p $tool --run "which
+        # $tool"` probe (a real network/build call on every single
+        # missing tool, one at a time) with a single up-front check of
+        # whether Kalilix's curated, pinned 32-tool set is actually
+        # enabled and covers this specific tool.
+        if [ "$KALILIX_ENABLED" = "true" ]; then
+            if printf '%s\n' "${KALILIX_TOOLS[@]}" | grep -qx "$tool"; then
+                echo -e "    ${GREEN}↳ Provided by Kalilix (tool_provisioning=kalilix) - already available to agents via the gateway${NC}"
+            else
+                echo -e "    ${YELLOW}↳ Not part of Kalilix's 32-tool set either - see KALI_SHELL.md upstream${NC}"
             fi
+        elif [ "$KALILIX_AVAILABLE" = "true" ] && printf '%s\n' "${KALILIX_TOOLS[@]}" | grep -qx "$tool"; then
+            echo -e "    ${BLUE}↳ Available via Kalilix (github.com/scopecreep-zip/kalilix) - run tools/clicky-setup.sh to enable tool_provisioning=kalilix${NC}"
+        elif command -v nix &> /dev/null; then
+            echo -e "    ${BLUE}↳ Available via: nix-shell -p $tool${NC}"
         fi
 
         # Suggest installation
         suggest_install $tool
         return 1
+    fi
+}
+
+# Kalilix awareness - run once, cheaply (no network/build calls), reused
+# by every check_tool() call above instead of each one probing nix
+# separately. Mirrors skills/mcp-gateway/scripts/launch.sh's own
+# tool_provisioning read - see that file for why CLAUDE_PLUGIN_OPTION_*
+# is the right variable to check (already normalized across all 4
+# supported CLI hosts via ~/.clicky/config.json, not just Claude Code).
+KALILIX_ENABLED="false"
+KALILIX_AVAILABLE="false"
+# The 32 tools Kalilix's #kali devShell provides, per its own KALI_SHELL.md
+# (confirmed via the real upstream repo, not assumed) - kept as a flat
+# list here since this script only needs "is $tool one of these," not
+# the categorization KALI_SHELL.md organizes them by.
+KALILIX_TOOLS=(
+    ffuf gobuster dirb sqlmap nikto wpscan burpsuite
+    nmap masscan nc socat
+    john hashcat hydra medusa
+    enum4linux enum4linux-ng
+    dnsenum
+    aircrack-ng
+    theharvester whatweb recon-ng
+    vol volatility2
+    radare2 objdump strings binwalk
+    metasploit
+    wireshark tcpdump
+    curl wget
+)
+check_kalilix() {
+    if [ "${CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING:-none}" = "kalilix" ]; then
+        KALILIX_ENABLED="true"
+    fi
+    if command -v nix &> /dev/null && nix registry list 2>/dev/null | grep -q "kalilix"; then
+        KALILIX_AVAILABLE="true"
     fi
 }
 
@@ -140,6 +188,7 @@ suggest_install() {
 # was always written with those three fields empty (verified) - a plain
 # ordering bug, not a logic error in detect_environment() itself.
 detect_environment
+check_kalilix
 
 # Main checks
 echo -e "\n${BLUE}[*] Checking Essential Tools...${NC}"
