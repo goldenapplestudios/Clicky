@@ -117,6 +117,28 @@
           subfinder
           amass
           netexec
+
+          # --- UDP / unauthenticated-service recon ---------------------------
+          # agents/recon-agent.md Phase 1 is required to cover UDP, and
+          # skills/nmap-scanning's UDP step (`nmap -sU`) needs raw sockets,
+          # which an unprivileged engagement shell does not have. The ordinary
+          # UDP *client* tools below need no privileges at all, so they are the
+          # real UDP coverage path - but none of them ship in Kalilix's #kali
+          # set, and tool-fallback.sh returns `none` for every one of them.
+          # That combination is the worst case this repo has a rule against:
+          # a missing tool reads exactly like a negative result. Confirmed
+          # absent on a live engagement host, all via the gateway.
+          net-snmp      # snmpwalk/snmpget/snmpbulkwalk - SNMP is the highest
+                        # value UDP probe: hrSWRunTable and the LanMan user
+                        # tables expose local accounts, processes and software.
+          onesixtyone   # SNMP community-string sweep; skills/service-enumeration
+                        # names it by hand in its SNMP section.
+          nbtscan       # NetBIOS name/user enumeration over udp/137.
+          ntp           # ntpq/ntpdc - `ntpdc -c monlist` reveals recent peers.
+          tftp-hpa      # tftp client; unauthenticated config-file retrieval.
+          ike-scan      # IKE/udp500 VPN endpoint + vendor fingerprinting.
+          sipsak        # SIP/udp5060 probing and extension enumeration.
+          avahi         # avahi-browse - mDNS/udp5353 service discovery.
         ];
 
         # Maintainer-only tooling: what the TEST SUITE needs, which is
