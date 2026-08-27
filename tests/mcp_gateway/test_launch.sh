@@ -55,6 +55,27 @@ grep -q 'exec ' "$LAUNCH"
 check_true "launch.sh's source execs the interpreter (doesn't just run it as a subprocess)" \
     "$([ $? -eq 0 ] && echo 1 || echo 0)"
 
+echo "--- the startup-budget invariant ---"
+#
+# THE regression guard for this file. Resolving the Kalilix toolchain used to
+# happen here, before the exec, which put a ~44s cold operation inside the MCP
+# client's server-startup timeout - and a stdio server that misses it is
+# reported "failed to connect" and never retried, leaving every agent (which
+# holds only gateway tools) with no tools at all for the whole session.
+#
+# The invariant: this file does only what the server cannot speak MCP without.
+# Comments may discuss Nix - the reasoning has to live somewhere - so strip
+# them and assert against the EXECUTABLE lines only.
+launch_code=$(grep -v '^[[:space:]]*#' "$LAUNCH" | grep -v '^[[:space:]]*$')
+for forbidden in nix print-dev-env toolchain warm-cache; do
+    if grep -qi -- "$forbidden" <<<"$launch_code"; then
+        check_true "no executable line in launch.sh references '$forbidden'" 0 \
+            "found: $(grep -i -- "$forbidden" <<<"$launch_code" | head -1)"
+    else
+        check_true "no executable line in launch.sh references '$forbidden'" 1
+    fi
+done
+
 echo "--- cold provisioning, exactly as launch.sh triggers it (stdout redirected to stderr) ---"
 start1=$(date +%s)
 stdout1=$( { CLAUDE_PLUGIN_DATA="$TEST_DATA_DIR" bash "$PROVISION" 1>&2; } 2>"$STDERR_CAPTURE" )
@@ -104,5 +125,37 @@ check_true "concurrent provisioning still leaves a working venv" \
     "$([ -x "$CONCURRENT_DIR/venv/bin/python" ] && "$CONCURRENT_DIR/venv/bin/python" -c 'import mcp' 2>/dev/null && echo 1 || echo 0)"
 rm -f "$c1_out" "$c2_out"
 rm -rf "$CONCURRENT_DIR"
+
+echo "--- warm startup fits inside the client's startup timeout ---"
+#
+# The requirement stated executably rather than in prose. Claude Code's
+# documented example MCP_TIMEOUT is 10000ms, and a server that misses the
+# startup deadline is not retried, so a warm start has to clear it with room.
+# The second assertion is the one that proves the decoupling: with Kalilix
+# CONFIGURED but no nix reachable, startup must be just as fast - before
+# lazification that combination is exactly what blew the budget.
+PROBE="$REPO_ROOT/skills/mcp-gateway/scripts/gateway_handshake_probe.py"
+if [ ! -f "$PROBE" ]; then
+    echo "SKIP: gateway_handshake_probe.py not found - handshake budget not measured"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "SKIP: python3 not available - handshake budget not measured"
+else
+    # Warm the data dir first; this measures STARTUP, not provisioning.
+    CLAUDE_PLUGIN_DATA="$TEST_DATA_DIR" bash "$PROVISION" >/dev/null 2>&1
+
+    for scenario in "default:" "kalilix-without-nix:kalilix"; do
+        label="${scenario%%:*}"; prov="${scenario#*:}"
+        t0=$(date +%s)
+        out=$(CLAUDE_PLUGIN_DATA="$TEST_DATA_DIR" \
+              CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING="$prov" \
+              CLICKY_NIX_CANDIDATES= \
+              timeout 60 python3 "$PROBE" "$LAUNCH" --timeout 45 2>&1 | head -1)
+        elapsed=$(( $(date +%s) - t0 ))
+        check_true "$label: MCP handshake completes (tools listed)" \
+            "$(grep -q '^TOOLS ' <<<"$out" && echo 1 || echo 0)" "got: $out"
+        check_true "$label: warm startup under 10s (documented MCP_TIMEOUT example)" \
+            "$([ "$elapsed" -lt 10 ] && echo 1 || echo 0)" "took ${elapsed}s"
+    done
+fi
 
 exit $FAILED

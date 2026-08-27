@@ -92,14 +92,25 @@ for path in toml_files:
     if not isinstance(gw, dict):
         print(f"FAIL: {label} mcp_servers.clicky-gateway is not a struct (got {type(gw).__name__}) - confirmed live that Codex rejects array/boolean forms here")
         failed = True
-    elif "command" not in gw or not str(gw["command"]).endswith("launch.sh"):
-        print(f"FAIL: {label} mcp_servers.clicky-gateway.command doesn't point at launch.sh: {gw.get('command')!r}")
+    elif gw.get("command") != "clicky-gateway":
+        # Must be the PATH-resolved launcher name, never a filesystem path.
+        # Codex's own docs show `command = "npx"` and only suggest an
+        # absolute path as a fallback "if Codex cannot find a command"; the
+        # MCP spec's canonical example is the same. Naming it keeps this
+        # checked-in file byte-identical on every machine - which is both a
+        # privacy property (no contributor's home directory in git) and what
+        # makes the drift check above able to pass off the generating
+        # machine. See tests/cli_targets/test_no_leaked_paths.sh.
+        print(f"FAIL: {label} mcp_servers.clicky-gateway.command is not the PATH-resolved 'clicky-gateway' name: {gw.get('command')!r}")
         failed = True
-    elif "env" not in gw or "CLAUDE_PLUGIN_ROOT" not in gw.get("env", {}):
-        print(f"FAIL: {label} mcp_servers.clicky-gateway.env missing CLAUDE_PLUGIN_ROOT")
+    elif "env" in gw:
+        # CLAUDE_PLUGIN_ROOT used to be injected here as a literal absolute
+        # path. launch.sh now derives it from its own resolved location, so
+        # an env block reappearing means someone reintroduced a baked path.
+        print(f"FAIL: {label} mcp_servers.clicky-gateway has an env block again ({gw['env']!r}) - launch.sh derives CLAUDE_PLUGIN_ROOT itself")
         failed = True
     else:
-        print(f"PASS: {label} mcp_servers.clicky-gateway is a correctly-shaped inline struct")
+        print(f"PASS: {label} mcp_servers.clicky-gateway is a correctly-shaped inline struct with no baked path")
 
     agent_name = data.get("name", "")
     if f'caller="{agent_name}"' not in data.get("developer_instructions", ""):

@@ -331,7 +331,7 @@ What *is* real, and still useful for reading each agent's output, is how determi
 | Cloud Recon | Structured, low-judgment | Same shape as Recon, applied to cloud provider APIs |
 | Source Analyzer | Structured, precise | Static-analysis output mapped to a fixed schema |
 
-None of this is enforced by a model or temperature setting - `model: inherit` means all 10 agents share whatever model the orchestrator is running under.
+None of this is enforced by a model or temperature setting - `model: inherit` means all 11 agents share whatever model the orchestrator is running under.
 
 ### Directory Structure Explained
 
@@ -555,6 +555,8 @@ sessions/pentest_20240115_143000_10_10_10_10/
 |   |-- technical_report.md      # Detailed technical report
 |   |-- evidence/                # Screenshots, logs
 |
+|-- state/            # engagement state (attack tree, coverage ledger,
+|                     #   technique authorizations) - see skills/engagement-state
 |-- checkpoints/
     |-- cp_001_recon.json        # After recon
     |-- cp_002_foothold.json     # After initial access
@@ -675,7 +677,7 @@ Everything else this section used to describe — timeouts, per-agent temperatur
 
 ### Beyond Claude Code: `~/.clicky/config.json` and the setup wizard
 
-`userConfig` only exists for Claude Code — Clicky's other three supported hosts (OpenCode, Codex CLI, Copilot CLI) have no equivalent built-in mechanism at all, confirmed by reading `tools/generate-cli-targets.py`'s own env-injection code: only `CLAUDE_PLUGIN_ROOT` is ever propagated into their generated configs, none of the `CLAUDE_PLUGIN_OPTION_*` values above. `~/.clicky/config.json` closes that gap: a single, CLI-neutral file holding the same keys as `userConfig`, read directly by `skills/mcp-gateway/scripts/launch.sh` (the one physical MCP-server entry point all four hosts already point at) whenever a host hasn't already set a given `CLAUDE_PLUGIN_OPTION_<KEY>` natively — a host's own native value always wins. `tools/clicky-setup.sh` is the wizard that writes it, plus real environment detection (is Nix/Kalilix/Codex CLI actually installed and working) `userConfig`'s own prompt can't do — see [Usage → Setup Wizard](usage.md#setup-wizard) for the full flow.
+`userConfig` only exists for Claude Code — Clicky's other three supported hosts (OpenCode, Codex CLI, Copilot CLI) have no equivalent built-in mechanism at all, confirmed by reading `tools/generate-cli-targets.py`: none of the `CLAUDE_PLUGIN_OPTION_*` values above reach their generated configs. (Those configs now carry no environment block at all — `CLAUDE_PLUGIN_ROOT` used to be injected into each one as a literal absolute path, but `launch.sh` derives it from its own resolved location instead, which is what keeps the checked-in artifacts free of any machine-specific path.) `~/.clicky/config.json` closes that gap: a single, CLI-neutral file holding the same keys as `userConfig`, read directly by `skills/mcp-gateway/scripts/launch.sh` (the one physical MCP-server entry point all four hosts already point at) whenever a host hasn't already set a given `CLAUDE_PLUGIN_OPTION_<KEY>` natively — a host's own native value always wins. `tools/clicky-setup.sh` is the wizard that writes it, plus real environment detection (is Nix/Kalilix/Codex CLI actually installed and working) `userConfig`'s own prompt can't do — see [Usage → Setup Wizard](usage.md#setup-wizard) for the full flow.
 
 ---
 

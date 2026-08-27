@@ -15,6 +15,13 @@ SESSION_BASE="${CLAUDE_PLUGIN_OPTION_DEFAULT_SESSION_DIRECTORY:-$HOME/.claude/se
 # Function to create a new session
 create_session() {
     local target="${1:-unknown}"
+    # The operator's stated objective, recorded verbatim. Binding it to the
+    # session is what lets report-agent state whether the engagement actually
+    # addressed what was asked, rather than silently substituting an easier
+    # goal it happened to make progress on - the "alternative route to the
+    # success condition" problem PentestJudge (arXiv 2508.02921) exists to
+    # catch. Empty is allowed; a wrong objective is worse than none.
+    local objective="${2:-}"
     local session_id="pentest_$(date +%Y%m%d_%H%M%S)_$$"
     local session_dir="$SESSION_BASE/$session_id"
 
@@ -23,13 +30,15 @@ create_session() {
     # (singular "exploit", includes privesc/ and checkpoints/); credentials/
     # and logs/ are additional real working directories this script (and
     # state-persistence.sh's logs/attempts.jsonl) writes into.
-    mkdir -p "$session_dir"/{recon,exploit,privesc,loot,reports,checkpoints,credentials,logs}
+    mkdir -p "$session_dir"/{recon,exploit,privesc,loot,reports,checkpoints,credentials,logs,state}
 
     # Create session metadata
     cat > "$session_dir/session.json" << EOF
 {
   "session_id": "$session_id",
   "target": "$target",
+  "objective": $(printf '%s' "$objective" | jq -R -s .),
+  "objective_status": "not_assessed",
   "start_time": "$(date -Iseconds)",
   "status": "active",
   "phase": "initialization"
@@ -328,7 +337,7 @@ main() {
             echo "Usage: $0 <command> [arguments]"
             echo ""
             echo "Commands:"
-            echo "  create <target>           Create a new session"
+            echo "  create <target> [objective]  Create a new session"
             echo "  update <id> <phase>       Update session phase"
             echo "  save-cred <id> <type> <value>  Save credentials"
             echo "  log <id> <severity> <finding>  Log a finding"

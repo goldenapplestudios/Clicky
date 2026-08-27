@@ -414,7 +414,7 @@ Lateral movement techniques.
 
 ### mcp-gateway
 
-The MCP server behind every tool call in the plugin now, not just another skill an agent references. All 10 agents (`recon`, `decision`, `exploit`, `privesc`, `loot`, `cloud-recon`, `source-analyzer`, `verification`, `report`, `severity-analyst`) have had their `tools:` frontmatter rewritten to grant exclusively a subset of its `mcp__plugin_clicky_clicky-gateway__*` tools in place of direct Bash/Read/Write/WebFetch - zero direct tool grants remain anywhere else in Clicky. It's registered via `.claude-plugin/plugin.json`'s `mcpServers` block and launched by `scripts/launch.sh`.
+The MCP server behind every tool call in the plugin now, not just another skill an agent references. All 11 agents (`recon`, `decision`, `exploit`, `privesc`, `loot`, `cloud-recon`, `source-analyzer`, `verification`, `report`, `severity-analyst`, `methodology-judge`) have had their `tools:` frontmatter rewritten to grant exclusively a subset of its `mcp__plugin_clicky_clicky-gateway__*` tools in place of direct Bash/Read/Write/WebFetch - zero direct tool grants remain anywhere else in Clicky. It's registered via `.claude-plugin/plugin.json`'s `mcpServers` block and launched by `scripts/launch.sh`.
 
 | Tool | Purpose |
 |------|---------|

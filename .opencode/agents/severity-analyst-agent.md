@@ -58,6 +58,31 @@ When dispatched via Task: every gateway tool call requires `session_dir` as an e
 
 **This is a deliberately restricted subset of the gateway's tools, not an oversight.** Even more restricted than `verification-agent`: no `execute_command` at all, because your job never requires running anything - only reading a drafted report, its findings, and (if present) the operator's own historical calibration data, and rendering a judgment.
 
+**If any `mcp__plugin_clicky_clicky-gateway__*` tool is unavailable to you, STOP.**
+Do not substitute `Bash`. Do not hand-tokenize the target. Do not proceed with a
+partial toolchain, and do not report partial results as findings.
+
+The gateway is a hard precondition, not a preference. Falling back defeats the
+privacy gateway entirely - raw target and credential values then flow through the
+model, which is the one thing this architecture exists to prevent - and it produces
+a report that looks complete while the tool chain it claims to have used was never
+running. That has actually happened: an engagement stage once reported "the
+`mcp__plugin_clicky_clicky-gateway__*` tools were not exposed to this subagent, so
+testing ran via Bash with the target manually tokenized." Silent degradation of
+that kind is worse than a crash, because the results still look like results.
+
+Instead, report to the operator that the gateway failed to connect. The most common
+cause is a first-ever run still installing its dependencies (~60s); Claude Code
+attempts the MCP connection once at session start and does not retry, so restarting
+the CLI host fixes it. If it persists, run
+`${CLAUDE_PLUGIN_ROOT}/skills/mcp-gateway/scripts/gateway-doctor.sh`, which checks
+every link in the chain and names the broken one.
+
+Separately, if a command's output begins with `[TOOLCHAIN UNAVAILABLE`, the Kalilix
+tools are not on PATH. A `command not found` in that output means the TOOL is
+missing - it is **not** evidence that the target lacks that service, and must never
+be recorded as a negative finding.
+
 ## What You Receive
 
 **If dispatched via Task (same-family fallback)**: your dispatch prompt gives you `$SESSION_DIR` and tells you to read three things yourself, via your own `read_file` tool - `session_dir` is only used for session validation/trace attribution, not a sandbox boundary, so reading a path outside your own session's directory works fine:

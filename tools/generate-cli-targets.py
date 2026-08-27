@@ -50,6 +50,42 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO_ROOT / "agents"
 COMMANDS_DIR = REPO_ROOT / "commands"
 
+# The MCP server command written into every generated per-CLI config.
+#
+# A bare name, resolved on PATH - never an absolute path. This is the
+# convention every MCP client documents: the canonical example in the MCP
+# specification's own "connect to local servers" guide is
+# `"command": "npx"`, with absolute paths appearing only in `args` (user
+# data directories). OpenCode's examples are bare `"npx"`/`"bun"`; Codex's
+# are `command = "npx"` (its docs only suggest an absolute path as a
+# fallback "if Codex cannot find a command"); Copilot's are
+# `command: 'some-command'`. Relative paths are not an option either - the
+# MCP docs rule them out explicitly ("absolute and not relative").
+#
+# Why this matters here, beyond following a convention:
+#
+#   Privacy. These artifacts are checked in. Baking the generating
+#   machine's absolute repo path into them published a contributor's home
+#   directory across 23 tracked files - in a project whose entire premise
+#   is a privacy-preserving gateway that keeps raw values out of model
+#   context. A PATH-resolved name has nothing machine-specific in it.
+#
+#   Testability. tests/cli_targets/'s drift check compares checked-in
+#   output byte-for-byte against a fresh generation. With an embedded
+#   absolute path that check could only ever pass on the one machine that
+#   last generated, and failed for every other contributor. With no
+#   machine-specific content, a difference now means *real* drift, which
+#   is what the check was always meant to catch.
+#
+#   Relocatability. The old design required regenerating after moving or
+#   re-cloning the repo. Nothing here depends on clone location anymore.
+#
+# `tools/clicky-setup.sh` installs this name onto PATH as a symlink to
+# skills/mcp-gateway/scripts/launch.sh, which resolves the symlink back to
+# its real location to find the repo root (and exports CLAUDE_PLUGIN_ROOT
+# from it, so no generated config has to carry that either).
+GATEWAY_COMMAND = "clicky-gateway"
+
 # ---------------------------------------------------------------------
 # Advanced per-agent framework/model assignment (tools/clicky-setup.sh
 # --advanced, see tools/advanced_agent_assignment.py). Operator-written,
@@ -476,39 +512,46 @@ def generate_opencode_session_agent(name: str, description: str) -> str:
 
 
 def generate_opencode_json() -> str:
-    # Confirmed live (opencode 1.1.59): opencode.json's own values are
-    # NOT shell/variable-expanded - a literal "${CLAUDE_PLUGIN_ROOT}"
-    # string in `command`/`environment` fails outright (`posix_spawn
-    # '${CLAUDE_PLUGIN_ROOT}/...': ENOENT`, the literal unexpanded string
-    # in the error). Unlike Claude Code (which expands ${CLAUDE_PLUGIN_ROOT}
-    # itself before spawning mcpServers.command), OpenCode has no
-    # equivalent config-level templating - so this bakes in the real
-    # absolute repo path at generation time instead. Real, honest
-    # trade-off: this file becomes specific to wherever the repo was
-    # cloned when generated; regenerate after moving/re-cloning the repo.
-    repo_root_str = str(REPO_ROOT)
+    # Contains NO filesystem paths at all - deliberately. See
+    # GATEWAY_COMMAND's comment for the full rationale; in short, every MCP
+    # client's documented convention is that `command` is a name resolved
+    # on PATH ("command": "npx" is the canonical example in the MCP docs),
+    # and OpenCode's own examples are bare "npx"/"bun" the same way.
+    #
+    # Two fields that used to carry an absolute path are gone entirely:
+    #
+    #   environment.CLAUDE_PLUGIN_ROOT - launch.sh now derives the repo
+    #     root from its own resolved location and exports this itself, so
+    #     no host config has to supply it. A host's own value still wins.
+    #
+    #   skills.paths - unnecessary. OpenCode auto-discovers skills from
+    #     `.claude/skills/<name>/SKILL.md`, walking up from the working
+    #     directory to the git worktree root (per OpenCode's skills docs).
+    #     This repo already tracks `.claude/skills -> ../skills` as a
+    #     symlink, so discovery works with no configuration. NOTE: worth a
+    #     live re-confirmation against a current opencode build - the
+    #     auto-discovery behavior is documented, but this specific
+    #     `skills.paths` key was not, so its removal is reasoned rather
+    #     than empirically verified.
     config = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": {
             "clicky-gateway": {
                 "type": "local",
-                "command": [
-                    f"{repo_root_str}/skills/mcp-gateway/scripts/launch.sh"
-                ],
-                "environment": {"CLAUDE_PLUGIN_ROOT": repo_root_str},
+                "command": [GATEWAY_COMMAND],
             }
         },
-        "skills": {"paths": [f"{repo_root_str}/skills"]},
     }
     header = (
         "// Generated by tools/generate-cli-targets.py. Do not edit by hand.\n"
         "//\n"
-        "// Paths below are absolute, baked in at generation time - confirmed\n"
-        "// live (opencode 1.1.59) that OpenCode does NOT expand ${VAR}-style\n"
-        "// placeholders in its own config values (unlike Claude Code, which\n"
-        "// expands ${CLAUDE_PLUGIN_ROOT} before spawning mcpServers.command).\n"
-        "// If this repo is moved or re-cloned elsewhere, regenerate this file:\n"
-        "// `python3 tools/generate-cli-targets.py opencode`.\n"
+        "// Contains no filesystem paths: `clicky-gateway` is resolved on\n"
+        "// PATH, matching the convention every MCP client documents (the\n"
+        "// canonical MCP example is `\"command\": \"npx\"`). Install the\n"
+        "// launcher onto PATH with tools/clicky-setup.sh.\n"
+        "//\n"
+        "// Because nothing here is machine-specific, this file is identical\n"
+        "// on every machine and needs no regeneration when the repo moves.\n"
     )
     return header + json.dumps(config, indent=2) + "\n"
 
@@ -701,12 +744,12 @@ def generate_opencode(out_dir: Path) -> dict[Path, str]:
 # bump (confirmed: openai/codex#33575 was fixed purely server-side).
 CODEX_MODEL = "gpt-5.4"
 
+# No path and no env block: `clicky-gateway` resolves on PATH, and
+# launch.sh derives/exports CLAUDE_PLUGIN_ROOT itself from its own
+# resolved location. See GATEWAY_COMMAND.
 _CODEX_GATEWAY_TOML = f"""\
 [mcp_servers.clicky-gateway]
-command = "{{repo_root}}/skills/mcp-gateway/scripts/launch.sh"
-
-[mcp_servers.clicky-gateway.env]
-CLAUDE_PLUGIN_ROOT = "{{repo_root}}"
+command = "{GATEWAY_COMMAND}"
 """
 
 
@@ -729,7 +772,6 @@ def generate_codex_agent(agent_path: Path) -> str:
     name = fm["name"]
     description = fm["description"]
     skills = split_list(fm.get("skills", ""))
-    repo_root_str = str(REPO_ROOT)
 
     caller_note = (
         f'Pass caller="{name}" on every clicky-gateway MCP tool call you make, '
@@ -797,7 +839,7 @@ def generate_codex_agent(agent_path: Path) -> str:
         "# concurrent access), just slower on first cold venv provisioning.\n"
     )
 
-    gateway_block = _CODEX_GATEWAY_TOML.format(repo_root=repo_root_str)
+    gateway_block = _CODEX_GATEWAY_TOML
 
     return (
         header
@@ -832,7 +874,6 @@ def generate_codex_prompt(command_path: Path) -> str:
 
 
 def generate_codex_install_sh() -> str:
-    repo_root_str = str(REPO_ROOT)
     return f"""\
 #!/bin/bash
 #
@@ -842,7 +883,7 @@ def generate_codex_install_sh() -> str:
 # confirmed global-only (see tools/generate-cli-targets.py's Codex
 # section doc comment) - there is no project-relative equivalent Codex
 # will discover on its own, unlike agents/*.toml (which IS project-
-# scoped and needs no install step). This script performs the two real
+# scoped and needs no install step). This script performs the real
 # global-install actions needed, using Codex's own official CLI where
 # one exists rather than hand-editing ~/.codex/config.toml directly.
 #
@@ -850,13 +891,29 @@ def generate_codex_install_sh() -> str:
 #
 set -euo pipefail
 
-REPO_ROOT="{repo_root_str}"
+# Derived from this script's own location, never baked in at generation
+# time. This file is checked into the repo, so a hardcoded absolute path
+# here would publish the generating machine's home directory - and would
+# be wrong for everyone who cloned anywhere else. See GATEWAY_COMMAND in
+# tools/generate-cli-targets.py.
+REPO_ROOT="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
+
+# The gateway is registered by NAME, resolved on PATH - the convention
+# every MCP client documents. Install the launcher first so that name
+# resolves.
+LAUNCHER_DIR="${{CLICKY_LOCAL_BIN:-$HOME/.local/bin}}"
+echo "--- Installing the {GATEWAY_COMMAND} launcher into $LAUNCHER_DIR ---"
+mkdir -p "$LAUNCHER_DIR"
+ln -sf "$REPO_ROOT/skills/mcp-gateway/scripts/launch.sh" "$LAUNCHER_DIR/{GATEWAY_COMMAND}"
+case ":$PATH:" in
+    *":$LAUNCHER_DIR:"*) ;;
+    *) echo "    NOTE: $LAUNCHER_DIR is not on your PATH - add it to your shell profile:"
+       echo '      export PATH="$HOME/.local/bin:$PATH"' ;;
+esac
 
 echo "--- Registering clicky-gateway MCP server globally (~/.codex/config.toml) ---"
 codex mcp remove clicky-gateway >/dev/null 2>&1 || true
-codex mcp add clicky-gateway \\
-    --env "CLAUDE_PLUGIN_ROOT=$REPO_ROOT" \\
-    -- "$REPO_ROOT/skills/mcp-gateway/scripts/launch.sh"
+codex mcp add clicky-gateway -- {GATEWAY_COMMAND}
 
 CODEX_HOME="${{CODEX_HOME:-$HOME/.codex}}"
 echo "--- Installing custom prompts into $CODEX_HOME/prompts/ ---"
@@ -1071,16 +1128,15 @@ def _copilot_mcp_servers_block(indent: str = "") -> str:
     - see the section doc comment. `args` and `tools` are both required
     fields at this level (confirmed via real schema-validation errors),
     not optional extras."""
-    repo_root_str = str(REPO_ROOT)
+    # No path, no env: `clicky-gateway` resolves on PATH and launch.sh
+    # derives/exports CLAUDE_PLUGIN_ROOT itself. See GATEWAY_COMMAND.
     lines = [
         "mcp-servers:",
         "  clicky-gateway:",
         "    type: local",
-        f"    command: {_yaml_quote(f'{repo_root_str}/skills/mcp-gateway/scripts/launch.sh')}",
+        f"    command: {_yaml_quote(GATEWAY_COMMAND)}",
         "    args: []",
         "    tools: [\"*\"]",
-        "    env:",
-        f"      CLAUDE_PLUGIN_ROOT: {_yaml_quote(repo_root_str)}",
     ]
     return "\n".join(indent + line for line in lines)
 

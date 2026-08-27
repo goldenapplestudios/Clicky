@@ -59,7 +59,7 @@ real values back to tokens in whatever it returns - so the model only ever
 sees tokens in either direction, while the actual command execution, file
 I/O, and network calls underneath use real data.
 
-## The 7 tools
+## The 8 tools
 
 All 7 are registered on an `mcp.server.mcpserver.MCPServer` instance in
 `server.py` via `@mcp.tool()`. Six of them take an explicit, required
@@ -231,6 +231,36 @@ the SDK's own documentation examples.
 `tests/mcp_gateway/test_scope_enforcement_modes.py` drives all three modes
 against a real subprocess server over real MCP stdio, including confirming
 `warn`'s log line and that `off`/`warn` never trigger elicitation.
+
+## Startup budget
+
+**Invariant: the gateway's startup path contains only work without which the
+server cannot speak MCP. Everything else is lazy.**
+
+That means `scripts/launch.sh` provisions the venv the server runs in and
+normalizes `~/.clicky/config.json` into the environment, then execs. Nothing
+else.
+
+The reason is a measured failure. Resolving the Kalilix toolchain
+(`nix print-dev-env`) used to happen before the exec and costs ~44s on a cold
+cache. Claude Code applies a startup timeout to stdio MCP servers
+(`MCP_TIMEOUT`; the documentation's own example is 10000ms), reports a server
+that misses it as "failed to connect", and **does not retry it for the rest of
+the session**. Because every Clicky agent holds only gateway tools, one missed
+startup left an entire engagement running against agents with no tools - and
+the observed failure was not a stop but a silent fallback to other tooling.
+
+The toolchain is now resolved by `scripts/toolchain-path.sh`, called lazily
+from `server.py` on the first `execute_command` and memoized, with a background
+warm kicked off when `create_session` succeeds (after the handshake, so it can
+never affect the startup timeout). A tool call has a far larger budget:
+`MCP_TOOL_TIMEOUT` defaults to ~28 hours when unset, and stdio servers have no
+per-request timer. The same work is fatal in one place and free in the other.
+
+`tests/mcp_gateway/test_launch.sh` enforces the invariant by stripping comments
+from `launch.sh` and asserting no executable line mentions nix, print-dev-env or
+the toolchain, and by asserting a warm handshake completes in under 10s even
+with `tool_provisioning=kalilix` configured and no nix reachable.
 
 ## Session context
 

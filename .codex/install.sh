@@ -6,7 +6,7 @@
 # confirmed global-only (see tools/generate-cli-targets.py's Codex
 # section doc comment) - there is no project-relative equivalent Codex
 # will discover on its own, unlike agents/*.toml (which IS project-
-# scoped and needs no install step). This script performs the two real
+# scoped and needs no install step). This script performs the real
 # global-install actions needed, using Codex's own official CLI where
 # one exists rather than hand-editing ~/.codex/config.toml directly.
 #
@@ -14,13 +14,29 @@
 #
 set -euo pipefail
 
-REPO_ROOT="/Users/kali/Clicky"
+# Derived from this script's own location, never baked in at generation
+# time. This file is checked into the repo, so a hardcoded absolute path
+# here would publish the generating machine's home directory - and would
+# be wrong for everyone who cloned anywhere else. See GATEWAY_COMMAND in
+# tools/generate-cli-targets.py.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The gateway is registered by NAME, resolved on PATH - the convention
+# every MCP client documents. Install the launcher first so that name
+# resolves.
+LAUNCHER_DIR="${CLICKY_LOCAL_BIN:-$HOME/.local/bin}"
+echo "--- Installing the clicky-gateway launcher into $LAUNCHER_DIR ---"
+mkdir -p "$LAUNCHER_DIR"
+ln -sf "$REPO_ROOT/skills/mcp-gateway/scripts/launch.sh" "$LAUNCHER_DIR/clicky-gateway"
+case ":$PATH:" in
+    *":$LAUNCHER_DIR:"*) ;;
+    *) echo "    NOTE: $LAUNCHER_DIR is not on your PATH - add it to your shell profile:"
+       echo '      export PATH="$HOME/.local/bin:$PATH"' ;;
+esac
 
 echo "--- Registering clicky-gateway MCP server globally (~/.codex/config.toml) ---"
 codex mcp remove clicky-gateway >/dev/null 2>&1 || true
-codex mcp add clicky-gateway \
-    --env "CLAUDE_PLUGIN_ROOT=$REPO_ROOT" \
-    -- "$REPO_ROOT/skills/mcp-gateway/scripts/launch.sh"
+codex mcp add clicky-gateway -- clicky-gateway
 
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 echo "--- Installing custom prompts into $CODEX_HOME/prompts/ ---"

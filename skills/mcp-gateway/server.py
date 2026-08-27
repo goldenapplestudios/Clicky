@@ -84,7 +84,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import signal
 import subprocess
+import threading
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -127,6 +130,14 @@ _SESSION_MANAGER_SCRIPT = (
 _VALIDATE_TARGET_SCRIPT = (
     _HERE.parent / "target-validation" / "scripts" / "validate-target.sh"
 )
+_ENGAGEMENT_STATE_SCRIPTS = _HERE.parent / "engagement-state" / "scripts"
+_TOOLCHAIN_SCRIPT = _HERE / "scripts" / "toolchain-path.sh"
+
+# Resolved once per process, on first use. See _toolchain_subprocess_env().
+_toolchain_lock = threading.Lock()
+_toolchain_env: dict | None = None
+_toolchain_error: str | None = None
+_TOOLCHAIN_TIMEOUT_S = int(os.environ.get("CLICKY_TOOLCHAIN_TIMEOUT_S", "300"))
 
 
 def _default_session_base() -> str:
@@ -273,8 +284,168 @@ def _trace(
         pass
 
 
+def _toolchain_subprocess_env() -> tuple[dict, str | None]:
+    """Return (environment for execute_command's subprocess, degradation reason).
+
+    Resolves the Kalilix toolchain PATH lazily, once per process, and memoizes
+    both success and failure. Never raises - same fail-open principle as
+    `_trace` and `_log_scope_event` above.
+
+    Why this is lazy rather than done in launch.sh before the server starts:
+    resolving costs ~44s on a cold cache, and on the startup path that sits
+    inside the MCP client's server-startup timeout (MCP_TIMEOUT). A stdio
+    server that misses it is reported "failed to connect" and is never retried,
+    which - since every Clicky agent holds only gateway tools - left whole
+    engagements running against agents with no tools. A tool call has a far
+    larger budget (MCP_TOOL_TIMEOUT defaults to ~28 hours unset, and stdio
+    servers have no per-request timer), so the same work is safe here.
+
+    The failure is memoized deliberately: without that, a broken Nix would make
+    every single command pay the full timeout, which is worse than the behavior
+    being replaced.
+    """
+    global _toolchain_env, _toolchain_error
+
+    # Fast exit before taking the lock or forking anything: the default
+    # configuration uses the ambient PATH and must pay exactly nothing.
+    if os.environ.get("CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING", "none") != "kalilix":
+        return os.environ.copy(), None
+
+    if _toolchain_env is not None:
+        return _toolchain_env, _toolchain_error
+
+    # The lock is required, not defensive: the MCP SDK dispatches sync tool
+    # handlers through anyio.to_thread.run_sync, so two execute_command calls
+    # can already be in flight on different threads.
+    with _toolchain_lock:
+        if _toolchain_env is not None:
+            return _toolchain_env, _toolchain_error
+
+        env = os.environ.copy()
+        reason: str | None = None
+        try:
+            proc = subprocess.run(
+                ["bash", str(_TOOLCHAIN_SCRIPT)],
+                capture_output=True,
+                text=True,
+                timeout=_TOOLCHAIN_TIMEOUT_S,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                env["PATH"] = f"{proc.stdout.strip()}:{env.get('PATH', '')}"
+            elif proc.returncode == 2:
+                pass  # not enabled - nothing to add, not a degradation
+            else:
+                reason = (proc.stderr.strip().splitlines() or ["resolution failed"])[-1]
+        except subprocess.TimeoutExpired:
+            reason = f"toolchain resolution exceeded {_TOOLCHAIN_TIMEOUT_S}s"
+        except OSError as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+
+        _toolchain_env = env
+        _toolchain_error = reason
+        return _toolchain_env, _toolchain_error
+
+
+# Prepended to execute_command's output whenever the Kalilix toolchain was
+# configured but could not be resolved. Same load-bearing-banner discipline as
+# the timeout notice further down: the danger is not the missing tool, it is an
+# agent reading "command not found" as evidence about the TARGET.
+_TOOLCHAIN_DEGRADED_BANNER = (
+    "[TOOLCHAIN UNAVAILABLE - Kalilix tools are NOT on PATH]\n"
+    "[tool_provisioning=kalilix is configured, but the toolchain could not be\n"
+    " resolved ({reason}). The command below ran against whatever was already\n"
+    " on this host's PATH. A \"command not found\" here means the TOOL is\n"
+    " missing - it is NOT evidence that the target lacks that service, and must\n"
+    " NOT be recorded as a negative finding. Fix: run tools/clicky-setup.sh,\n"
+    " then restart your CLI host.]\n"
+)
+
+
+# Credential-attack tooling the technique gate applies to. Brute force is the
+# most over-prescribed action LLM pentest agents take: the PentestGPT
+# evaluation (USENIX Security '24, Table 3) counted it as the #1 unnecessary
+# operation at 235 instances across models - about 3x the next category - and
+# found the strongest model was the worst offender. Prompt instructions do not
+# reliably suppress a learned prior, so the gate is enforced HERE, where the
+# command would actually run, rather than only asked for in an agent prompt.
+#
+# Matching is deliberately narrow (tool name at a command position, plus
+# password-list flags for the sweep tools) so ordinary commands that merely
+# mention a tool - `which hydra`, `grep hydra notes.txt` - are not blocked.
+_CREDENTIAL_ATTACK_PATTERNS = [
+    r"(?:^|[|;&]\s*|\$\()\s*(?:sudo\s+)?(?:hydra|medusa|ncrack|patator|crowbar|brutespray)\b",
+    # Interpreter prefixes count: `python3 /opt/tools/ssh-spray.py ...` is
+    # still a spray. Anchoring only at a command position let that bypass.
+    r"(?:^|[|;&]\s*|\$\()\s*(?:sudo\s+)?(?:python3?\s+|perl\s+|ruby\s+)?\S*ssh-spray\.py\b",
+    r"\b(?:crackmapexec|nxc|netexec)\b.*(?:-p\s|--password|-P\s)",
+    r"\bmsfconsole\b.*\b\w+_login\b",
+    r"\buse\s+auxiliary/scanner/\S+_login\b",
+]
+
+# Flags that mean "show help", not "attack something".
+#
+# Long forms ONLY, deliberately. Short flags are ambiguous in exactly this
+# tool family and reading them as "help" opens a bypass: `medusa -h <target>`
+# sets the HOST, and hydra's `-V` is verbose, not version. Treating either as
+# benign would wave a real attack through. A `hydra -h` that gets blocked is a
+# harmless false positive; a `medusa -h victim` that runs is not.
+_BENIGN_INVOCATION = re.compile(r"(?:^|\s)(?:--help|--version|--usage)\b")
+
+
+def _credential_attack_gate(resolved: str, session_dir: str) -> str | None:
+    """Return a refusal string if `resolved` is a credential attack that this
+    session has not authorized via skills/engagement-state/technique-gate.sh.
+
+    Returns None when the command is unrelated, or when an authorization
+    exists. Fails closed: an unreadable/absent authorization file blocks.
+    """
+    if _BENIGN_INVOCATION.search(resolved):
+        return None
+    if not any(re.search(p, resolved, re.I) for p in _CREDENTIAL_ATTACK_PATTERNS):
+        return None
+
+    auth_path = Path(session_dir) / "state" / "technique-authorizations.json"
+    try:
+        data = json.loads(auth_path.read_text())
+        granted = [
+            a for a in data.get("authorizations", [])
+            if a.get("technique") == "credential_attack" and a.get("granted")
+        ]
+    except (OSError, ValueError):
+        granted = []
+
+    if granted:
+        return None
+
+    return (
+        "[BLOCKED BY TECHNIQUE GATE - credential_attack is not authorized for "
+        "this session]\n"
+        "\n"
+        "This command looks like a credential brute-force/spray. Clicky requires an "
+        "explicit authorization before running one, because brute force is the most "
+        "over-prescribed and lowest-yield action available to an automated tester "
+        "(PentestGPT, USENIX Security '24, Table 3: the #1 unnecessary operation, "
+        "235 instances - roughly 3x the next category).\n"
+        "\n"
+        "To proceed you must record evidence for ALL THREE preconditions:\n"
+        "  1. --auth-surface    the service actually accepts credential auth, and you observed it\n"
+        "  2. --username-link   your usernames belong to THIS service - names scraped from a\n"
+        "                       web page are NOT evidence that those people hold SSH accounts\n"
+        "  3. --operator-approval  the human operator authorized this specific attack\n"
+        "\n"
+        "  ${CLAUDE_PLUGIN_ROOT}/skills/engagement-state/scripts/technique-gate.sh request \\\n"
+        "      <session_dir> --technique credential_attack --service <svc> --port <port> \\\n"
+        "      --auth-surface '<evidence>' --username-link '<evidence>' \\\n"
+        "      --operator-approval '<what the operator said>'\n"
+        "\n"
+        "If you cannot supply that evidence, the correct next action is more discovery, "
+        "not more guessing. OWASP WSTG orders information gathering (INFO-*) and "
+        "configuration testing (CONF-*) BEFORE authentication testing (ATHN-*)."
+    )
+
+
 @mcp.tool()
-def create_session(target: str, caller: str = "") -> dict:
+def create_session(target: str, objective: str = "", caller: str = "") -> dict:
     """Create a new Clicky session for `target` and return its session_dir/session_id.
 
     The one gateway tool that does NOT take `session_dir` - it creates one.
@@ -349,7 +520,7 @@ def create_session(target: str, caller: str = "") -> dict:
 
     try:
         proc = subprocess.run(
-            ["bash", str(_SESSION_MANAGER_SCRIPT), "create", target],
+            ["bash", str(_SESSION_MANAGER_SCRIPT), "create", target, objective],
             capture_output=True,
             text=True,
             timeout=60,
@@ -385,16 +556,57 @@ def create_session(target: str, caller: str = "") -> dict:
             f"validation: {exc}"
         ) from exc
 
+    # Initialize engagement state up front so no agent can claim later that
+    # the tree/ledger "did not exist yet". These are the externalized state
+    # files that survive context compaction and agent handoff - the whole
+    # point of maintaining them outside the model (see
+    # skills/engagement-state/SKILL.md).
+    state_init = []
+    for script, args in (
+        ("attack-tree.sh", ["init", session_dir, target, objective]),
+        ("coverage-ledger.sh", ["init", session_dir]),
+        ("technique-gate.sh", ["init", session_dir]),
+    ):
+        script_path = _ENGAGEMENT_STATE_SCRIPTS / script
+        if not script_path.is_file():
+            state_init.append(f"{script}=missing")
+            continue
+        try:
+            r = subprocess.run(["bash", str(script_path), *args],
+                               capture_output=True, text=True, timeout=30)
+            state_init.append(f"{script}={'ok' if r.returncode == 0 else 'failed'}")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            state_init.append(f"{script}=error:{type(exc).__name__}")
+
+    # Warm the Kalilix toolchain in the background now, so the first
+    # execute_command does not pay the ~44s cold resolve.
+    #
+    # Started HERE rather than at import deliberately: create_session can only
+    # run after the MCP handshake already succeeded, so this cannot contribute
+    # to the startup timeout that this whole design exists to stay clear of.
+    # It also typically lands 10-30s before the first command. Daemon, and
+    # _toolchain_subprocess_env never raises, so it cannot affect this call.
+    if os.environ.get("CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING", "none") == "kalilix":
+        threading.Thread(
+            target=_toolchain_subprocess_env, daemon=True, name="clicky-toolchain-warm"
+        ).start()
+        state_init.append("toolchain=warming")
+
     _trace(
         session_dir,
         event="tool_call",
         tool_name="create_session",
         caller=caller,
-        tool_input={"target": target},
-        tool_result=f"session_id={session_id}",
+        tool_input={"target": target, "objective": objective},
+        tool_result=f"session_id={session_id} state=[{','.join(state_init)}]",
     )
 
-    return {"session_dir": session_dir, "session_id": session_id}
+    return {
+        "session_dir": session_dir,
+        "session_id": session_id,
+        "objective": objective,
+        "engagement_state": state_init,
+    }
 
 
 @mcp.tool()
@@ -620,17 +832,81 @@ def execute_command(
     store = TokenStore(session_dir)
     resolved = store.resolve(command)
 
+    refusal = _credential_attack_gate(resolved, session_dir)
+    if refusal is not None:
+        redacted = store.redact(refusal)
+        _trace(
+            session_dir,
+            event="tool_call",
+            tool_name="execute_command",
+            caller=caller,
+            tool_input={"command": command, "timeout_s": timeout_s},
+            tool_result=redacted,
+        )
+        return redacted
+
+    # Resolve the Kalilix toolchain lazily, here, at the one call site that
+    # actually needs it - normally already warm from create_session below.
+    #
+    # The result is passed as `env=` rather than written into os.environ: the
+    # bash helpers create_session runs, and search_files' grep, execute BEFORE
+    # the first execute_command, so mutating the process environment would make
+    # the same helper resolve a different bash/grep depending on call ordering,
+    # inside a process that handles credentials. Scoping it to this Popen keeps
+    # the toolchain exactly where it was verified to be needed.
+    subprocess_env, toolchain_error = _toolchain_subprocess_env()
+
+    # `start_new_session=True` puts the command in its own process group so a
+    # timeout can kill the whole tree. Without it, `shell=True` means we kill
+    # only the shell and orphan the real work (nmap, hydra, a spray script),
+    # which keeps hammering the target after the agent believes it stopped.
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             resolved,
             shell=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_s,
+            start_new_session=True,
+            env=subprocess_env,
         )
-        output = f"[exit {proc.returncode}]\n{proc.stdout}{proc.stderr}"
-    except subprocess.TimeoutExpired:
-        output = f"[TIMEOUT after {timeout_s}s]"
+    except OSError as exc:
+        output = f"[exit -1]\n[LAUNCH FAILED] {type(exc).__name__}: {exc}"
+    else:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_s)
+            output = f"[exit {proc.returncode}]\n{stdout}{stderr}"
+        except subprocess.TimeoutExpired:
+            # Kill the process group, then re-read. communicate() after a kill
+            # returns whatever the command had already written, so a job that
+            # ran for 299 of its 300 seconds still hands back its partial work
+            # instead of being thrown away.
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:  # pragma: no cover - kill hung
+                stdout, stderr = "", ""
+            partial = f"{stdout or ''}{stderr or ''}"
+            # This banner is load-bearing: an agent MUST NOT read a timed-out
+            # command as "nothing found". The result is unknown, not negative.
+            output = (
+                f"[TIMEOUT after {timeout_s}s - COMMAND KILLED, RESULT INCOMPLETE]\n"
+                f"[The output below is PARTIAL. It is NOT a negative result: the\n"
+                f" command did not finish, so anything it had not yet reached is\n"
+                f" UNTESTED. Re-run with a larger timeout_s, a narrower scope, or\n"
+                f" write output to a file under the session dir and poll it.]\n"
+                f"{partial}"
+                + ("" if partial else "[no output was produced before the kill]\n")
+            )
+
+    # Emitted on EVERY degraded call, not once per process: each command is
+    # independently at risk of being misread, including by a subagent that
+    # never saw the first one.
+    if toolchain_error:
+        output = _TOOLCHAIN_DEGRADED_BANNER.format(reason=toolchain_error) + output
 
     redacted = store.redact(output)
     _trace(
@@ -640,6 +916,9 @@ def execute_command(
         caller=caller,
         tool_input={"command": command, "timeout_s": timeout_s},
         tool_result=redacted,
+        # Carries the degradation into trace.jsonl, where report-agent and
+        # methodology-judge-agent already look for incomplete/untested work.
+        error=toolchain_error,
     )
     return redacted
 

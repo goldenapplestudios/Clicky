@@ -17,14 +17,25 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class Handler(BaseHTTPRequestHandler):
+    # HTTP/1.1 with an explicit Content-Length, so the client knows exactly how
+    # many body bytes to expect. Under HTTP/1.0 the body is framed by the
+    # connection closing, and over TLS a close without a clean close_notify is
+    # indistinguishable from a truncation attack - curl reports exit 56
+    # ("failure receiving network data") even though the body arrived intact.
+    # That made this server look permanently un-ready to the readiness probe in
+    # test_tls_scan.sh, which requires curl to exit 0.
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         pass  # keep test output quiet
 
     def do_GET(self):
+        body = b"ok"
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(body)
 
 
 def main():
@@ -35,7 +46,12 @@ def main():
     ctx.maximum_version = ssl.TLSVersion.TLSv1_3
     ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

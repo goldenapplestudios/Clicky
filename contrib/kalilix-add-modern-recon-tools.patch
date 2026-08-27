@@ -1,0 +1,74 @@
+From e28a4449e7001955e9444608c8b01866eb0db3dc Mon Sep 17 00:00:00 2001
+From: Kali Jackson <k1104jackson@hotmail.com>
+Date: Wed, 26 Aug 2026 15:54:19 -0700
+Subject: [PATCH] kali: add modern web recon and templated scanning tools
+
+Adds six tools to the #kali devShell that are already packaged in
+nixpkgs but not currently exposed:
+
+  nuclei       template-based vulnerability scanner
+  katana       JS-aware crawler for endpoint discovery on SPAs
+  feroxbuster  fast recursive content discovery
+  subfinder    passive subdomain discovery
+  amass        in-depth attack surface mapping
+  netexec      network service enumeration, the maintained successor
+               to crackmapexec
+
+Motivation: the shell currently covers classic Kali tooling well
+(gobuster/sqlmap/nikto/dirb/hydra/enum4linux), but has no templated
+vulnerability scanner and no JS-aware crawler. On modern SPA targets
+(React/Next.js/Vue) a static crawler cannot see client-rendered routes,
+so content discovery misses most of the application's real surface.
+nuclei and katana close that gap; feroxbuster/subfinder/amass add depth
+to discovery paths that currently rely on a single tool each.
+
+All six are cross-platform (Go/Rust/Python), so no isLinux gating is
+needed. The shellHook's category listing is extended to match.
+
+Verified: `nix eval .#devShells.x86_64-linux.kali` evaluates, and all
+six appear in the resulting buildInputs (82 entries total).
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ modules/devshells/default.nix | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/modules/devshells/default.nix b/modules/devshells/default.nix
+index 9e426e8..c6d0f81 100644
+--- a/modules/devshells/default.nix
++++ b/modules/devshells/default.nix
+@@ -207,6 +207,14 @@ in
+       binwalk # Firmware analysis tool
+       recon-ng # Reconnaissance framework
+       medusa # Network authentication brute forcer
++
++      # Modern web recon and templated scanning
++      nuclei # Template-based vulnerability scanner
++      katana # JS-aware crawler for endpoint discovery on SPAs
++      feroxbuster # Fast recursive content discovery
++      subfinder # Passive subdomain discovery
++      amass # In-depth attack surface mapping
++      netexec # Network service enumeration (maintained crackmapexec successor)
+     ] ++ lib.optionals isLinux [
+       # Linux-only tools
+       wpscan # WordPress security scanner (Linux only)
+@@ -225,11 +233,14 @@ in
+     in ''
+       echo "🔒 Kali Security Testing Environment"
+       echo "   Platform: ${system}"
+-      echo "   Web Fuzzing: ffuf"
++      echo "   Web Fuzzing: ffuf, feroxbuster"
+       echo "   Network Scanning: nmap, masscan"
+       echo "   Web Security: ${webSecTools}"
+-      echo "   SMB/CIFS Enumeration: enum4linux, enum4linux-ng"
++      echo "   Templated Scanning: nuclei"
++      echo "   Web Crawling: katana"
++      echo "   SMB/CIFS Enumeration: enum4linux, enum4linux-ng, netexec"
+       echo "   DNS Enumeration: dnsenum"
++      echo "   Subdomain Enumeration: subfinder, amass"
+       echo "   Wireless: aircrack-ng"
+       echo "   Password: hashcat, john, hydra, medusa"
+       echo "   Exploitation: metasploit"
+-- 
+2.53.0
+

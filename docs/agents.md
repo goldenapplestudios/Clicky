@@ -17,7 +17,8 @@
 9. [Verification Agent](#verification-agent)
 10. [Report Agent](#report-agent)
 11. [Severity Analyst Agent](#severity-analyst-agent)
-12. [Agent Interaction Patterns](#agent-interaction-patterns)
+12. [Methodology Judge Agent](#methodology-judge-agent)
+13. [Agent Interaction Patterns](#agent-interaction-patterns)
 
 ---
 
@@ -1353,6 +1354,51 @@ Same restricted-reviewer posture as Verification Agent, one level further: no `w
 ### Scope Boundary
 
 Wires into `commands/pentest.md` Step 11 only, same constraint as Report Agent - `workflows/pentest-parallel.js` has no confirmed mechanism to invoke it yet.
+
+---
+
+## Methodology Judge Agent
+
+**File:** `agents/methodology-judge-agent.md`
+**Dispatched by:** `commands/pentest.md` Step 9.7, before the report is drafted.
+
+Judges **how the engagement was conducted**, not what it found. Every other
+review layer in Clicky scores findings - `verification-agent` asks whether a
+finding is true (Tier 2), `severity-analyst-agent` asks whether its severity is
+proportionate (Tier 3). This agent asks a question none of them do: *was the
+method sound at all?* A test that produced findings by luck while skipping half
+the methodology is a failed test, and a test that found nothing after genuinely
+thorough work is a successful one. Its verdict is therefore independent of the
+finding count.
+
+This follows the PentestJudge approach (arXiv 2508.02921), which evaluates an
+agent's trajectory against hierarchical yes/no rubrics rather than its end
+state, because "models may find alternative routes to the success condition
+that bypass the intended behavior" - an agent quietly solving an easier problem
+than the one it was given.
+
+**Inputs** (all read-only): `session.json` (the operator's stated objective),
+the attack tree, the coverage ledger, the technique authorizations, and
+`logs/trace.jsonl` - what commands actually ran. A missing state file is itself
+a finding: the engagement ran without maintaining its own state.
+
+**Rubric**, scored PASS/FAIL/N-A with cited evidence per leaf:
+
+| Group | Asks |
+|---|---|
+| A. Objective fidelity | Was the operator's stated goal pursued, or quietly substituted? |
+| B. Discovery before exploitation | Was recon complete first? Were the target's own authoritative artifacts read before wordlist guessing? Did CONF-* precede ATHN-*? |
+| C. Technique selection | Was every credential attack gated and evidenced? Was brute force used as a substitute for discovery? |
+| D. Evidence and honesty | Is any timed-out, killed, or throttled check reported as a clean negative? |
+| E. Re-planning | When a phase returned nothing, was the tree re-prioritized, or did the pipeline just advance? |
+
+**Output:** `$SESSION_DIR/reports/methodology-review.md`, plus it sets
+`objective_status` in `session.json`. A verdict of **UNSOUND** (triggered by
+failing A2, A4, B3, C1, C2, or D2) must appear in the report's executive
+summary - a reader deciding whether to trust the results needs it before the
+findings, not after.
+
+See `skills/engagement-state/SKILL.md` for the state files it reads.
 
 ---
 

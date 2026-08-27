@@ -77,6 +77,9 @@ mk_workdir() {
 echo "=== Case: no AI CLIs, no nix, no codex, no npm - decline everything ==="
 WORK=$(mk_workdir)
 OUT=$(PATH="$CORE_PATH" \
+    CLICKY_PREFLIGHT=off \
+    CLICKY_NIX_CANDIDATES= \
+    CLICKY_LOCAL_BIN="$WORK/localbin" \
     CLICKY_CONFIG_DIR="$WORK/clicky-config" \
     CLICKY_CONFIG_PATH="$WORK/clicky-config/config.json" \
     CLICKY_CLAUDE_SETTINGS_PATH="$WORK/claude/settings.json" \
@@ -150,6 +153,9 @@ fi
 # fake_bin first so our stubs win for the names we're actually testing,
 # CORE_PATH after for everything else.
 OUT=$(PATH="$FAKE_BIN:$CORE_PATH" \
+    CLICKY_PREFLIGHT=off \
+    CLICKY_NIX_CANDIDATES= \
+    CLICKY_LOCAL_BIN="$WORK/localbin" \
     CLICKY_CONFIG_DIR="$WORK/clicky-config" \
     CLICKY_CONFIG_PATH="$WORK/clicky-config/config.json" \
     CLICKY_CLAUDE_SETTINGS_PATH="$WORK/claude/settings.json" \
@@ -190,6 +196,9 @@ chmod +x "$FAKE_BIN/codex"
 # re-run doesn't write real prompt files into ~/.codex/prompts/.
 OUT=$(PATH="$FAKE_BIN:$CORE_PATH" \
     CODEX_HOME="$WORK/codex-home" \
+    CLICKY_PREFLIGHT=off \
+    CLICKY_NIX_CANDIDATES= \
+    CLICKY_LOCAL_BIN="$WORK/localbin" \
     CLICKY_CONFIG_DIR="$WORK/clicky-config" \
     CLICKY_CONFIG_PATH="$WORK/clicky-config/config.json" \
     CLICKY_CLAUDE_SETTINGS_PATH="$WORK/claude/settings.json" \
@@ -212,6 +221,9 @@ cat > "$WORK/clicky-config/config.json" << 'EOF'
 }
 EOF
 PATH="$CORE_PATH" \
+    CLICKY_PREFLIGHT=off \
+    CLICKY_NIX_CANDIDATES= \
+    CLICKY_LOCAL_BIN="$WORK/localbin" \
     CLICKY_CONFIG_DIR="$WORK/clicky-config" \
     CLICKY_CONFIG_PATH="$WORK/clicky-config/config.json" \
     CLICKY_CLAUDE_SETTINGS_PATH="$WORK/claude/settings.json" \
@@ -228,6 +240,9 @@ echo ""
 echo "=== Re-run Fixture 1 under real /bin/bash (macOS's frozen 3.2.57) ==="
 WORK=$(mk_workdir)
 OUT=$(PATH="$CORE_PATH" \
+    CLICKY_PREFLIGHT=off \
+    CLICKY_NIX_CANDIDATES= \
+    CLICKY_LOCAL_BIN="$WORK/localbin" \
     CLICKY_CONFIG_DIR="$WORK/clicky-config" \
     CLICKY_CONFIG_PATH="$WORK/clicky-config/config.json" \
     CLICKY_CLAUDE_SETTINGS_PATH="$WORK/claude/settings.json" \
@@ -240,5 +255,84 @@ contains "bash-3.2: still detects nothing installed correctly" "$OUT" "(none det
 check "bash-3.2: tool_provisioning written as none" \
     "$(python3 -c "import json; print(json.load(open('$WORK/clicky-config/config.json'))['tool_provisioning'])")" "none"
 rm -rf "$WORK"
+
+echo "=== Case: preflight RESOLVES missing dependencies, not just reports them ==="
+# The fixtures above run with CLICKY_PREFLIGHT=off because preflight is the
+# one step that installs software and uses the network. This case turns it
+# back on deliberately.
+#
+# Background: on a fresh Kali install (python3.13, no python3.13-venv), the
+# clicky-gateway MCP server failed to start for EVERY session and nothing in
+# the install process said so. Since all 8 Clicky agents are provisioned with
+# the gateway's tools and nothing else, that is a total outage rather than a
+# degradation - the operator only discovered it when an agent dispatch
+# produced an agent with no tools at all. Preflight exists to catch that at
+# install time and to FIX it, not to print instructions and move on.
+PRE_WORK=$(mktemp -d)
+PRE_STUB=$(mktemp -d)
+# No usable sudo, so the only way jq can appear is the rootless path.
+printf '#!/bin/sh\nexit 1\n' > "$PRE_STUB/sudo"
+chmod +x "$PRE_STUB/sudo"
+
+if ! curl -sSf --max-time 15 -o /dev/null https://github.com 2>/dev/null; then
+    echo "SKIP: no network - preflight resolves real dependencies by design"
+else
+    PRE_OUT=$(printf 'n\nn\nn\n' | env \
+        PATH="$PRE_STUB:$CORE_PATH" \
+        CLICKY_LOCAL_BIN="$PRE_WORK/localbin" \
+        CLICKY_NIX_CANDIDATES= \
+        CLICKY_CONFIG_DIR="$PRE_WORK/clicky-config" \
+        CLICKY_CONFIG_PATH="$PRE_WORK/clicky-config/config.json" \
+        CLICKY_CLAUDE_SETTINGS_PATH="$PRE_WORK/claude/settings.json" \
+        CLAUDE_PLUGIN_DATA="$PRE_WORK/plugindata" \
+        bash "$WIZARD" 2>&1)
+
+    contains "preflight: reports jq missing" "$PRE_OUT" "jq: MISSING"
+    contains "preflight: actually installs jq rather than only advising" "$PRE_OUT" "jq: installed"
+    check "preflight: the installed jq binary really runs" \
+        "$("$PRE_WORK/localbin/jq" --version >/dev/null 2>&1 && echo yes || echo no)" "yes"
+    contains "preflight: provisions the gateway for real" "$PRE_OUT" "Gateway: READY"
+    check "preflight: the provisioned venv can actually import mcp" \
+        "$("$PRE_WORK/plugindata/venv/bin/python3" -c 'import mcp' >/dev/null 2>&1 && echo yes || echo no)" "yes"
+    contains "preflight: summary reports the gateway ready" "$PRE_OUT" "MCP gateway:      ready"
+    # A gateway provisioned mid-session is useless until the host restarts:
+    # Claude Code attempts the MCP connection once at session start and does
+    # not retry, which is why the original repair still needed a restart.
+    contains "preflight: summary tells the operator to restart" "$PRE_OUT" "Restart your CLI host"
+
+    echo "--- a tampered jq download must be refused, never installed ---"
+    TAM_WORK=$(mktemp -d)
+    TAM_STUB=$(mktemp -d)
+    printf '#!/bin/sh\nexit 1\n' > "$TAM_STUB/sudo"
+    chmod +x "$TAM_STUB/sudo"
+    # curl stub returning an attacker-controlled payload for any -o fetch.
+    cat > "$TAM_STUB/curl" <<'TAMPEREOF'
+#!/bin/sh
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+[ -n "$out" ] && printf '#!/bin/sh\necho PWNED\n' > "$out"
+exit 0
+TAMPEREOF
+    chmod +x "$TAM_STUB/curl"
+
+    TAM_OUT=$(printf 'n\nn\nn\n' | env \
+        PATH="$TAM_STUB:$CORE_PATH" \
+        CLICKY_LOCAL_BIN="$TAM_WORK/localbin" \
+        CLICKY_NIX_CANDIDATES= \
+        CLICKY_CONFIG_DIR="$TAM_WORK/clicky-config" \
+        CLICKY_CONFIG_PATH="$TAM_WORK/clicky-config/config.json" \
+        CLICKY_CLAUDE_SETTINGS_PATH="$TAM_WORK/claude/settings.json" \
+        CLAUDE_PLUGIN_DATA="$TAM_WORK/plugindata" \
+        bash "$WIZARD" 2>&1)
+
+    contains "tamper: checksum mismatch is detected" "$TAM_OUT" "CHECKSUM MISMATCH"
+    check "tamper: the tampered binary is NOT installed" \
+        "$([ ! -e "$TAM_WORK/localbin/jq" ] && echo absent || echo present)" "absent"
+    # Failure must never be reported as success.
+    contains "tamper: gateway failure is surfaced, not swallowed" "$TAM_OUT" "Gateway: FAILED"
+    contains "tamper: summary warns against running /pentest" "$TAM_OUT" "Do NOT run /pentest yet"
+    rm -rf "$TAM_WORK" "$TAM_STUB"
+fi
+rm -rf "$PRE_WORK" "$PRE_STUB"
 
 exit $FAILED

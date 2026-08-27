@@ -77,7 +77,7 @@ Each generated agent embeds its own MCP server registration directly in its fron
 
 ### Setup Wizard
 
-Before your first scan, run the setup wizard - detects your environment, offers to install [Nix](https://lix.systems/) so agents get a real, reproducible 33-tool pentest toolkit via [Kalilix](https://github.com/scopecreep-zip/kalilix) (nmap, sqlmap, hydra, metasploit, and more - no manual installs), offers to install Codex CLI so `severity-analyst-agent`'s report review runs cross-provider instead of reviewing itself, then configures whichever of the 4 CLI hosts above you actually have installed - all from one file (`~/.clicky/config.json`), one run:
+Optional, but recommended before your first scan (Clicky works without it - the gateway provisions itself and resolves tools on first use): the setup wizard detects your environment, offers to install [Nix](https://lix.systems/) so agents get a real, reproducible 33-tool pentest toolkit via [Kalilix](https://github.com/scopecreep-zip/kalilix) (nmap, sqlmap, hydra, metasploit, and more - no manual installs), offers to install Codex CLI so `severity-analyst-agent`'s report review runs cross-provider instead of reviewing itself, then configures whichever of the 4 CLI hosts above you actually have installed - all from one file (`~/.clicky/config.json`), one run:
 
 ```bash
 tools/clicky-setup.sh
@@ -172,6 +172,7 @@ Agents are defined in `agents/` as markdown files with YAML frontmatter specifyi
 - **verification-agent**: Independently re-checks CRITICAL/HIGH findings against raw trace evidence before they reach the report (see [Agents](docs/agents.md#verification-agent))
 - **report-agent**: Synthesizes already-validated session findings into the final client-facing report - CVSS/OWASP/CIS/NIST framework mapping, risk matrix, and narrative - replacing direct `report-generator.sh` invocation from the orchestrator (see [Agents](docs/agents.md#report-agent))
 - **severity-analyst-agent**: Adversarial senior-analyst review of the drafted report's severity/impact scoring - kill-mandate critique across every finding together, cross-model-family by default, producing per-finding deltas and a report-level slop score that feeds a real calibration loop back into report-agent (see [Agents](docs/agents.md#severity-analyst-agent))
+- **methodology-judge-agent**: Judges *how* the engagement was conducted, independent of what it found - discovery-before-exploitation ordering, whether brute force substituted for discovery, whether an incomplete check is being reported as a clean negative, and whether the operator's stated objective was actually pursued rather than quietly swapped for an easier one. Runs before the report; an UNSOUND verdict lands in the executive summary (see [Agents](docs/agents.md#methodology-judge-agent))
 
 ### Commands
 

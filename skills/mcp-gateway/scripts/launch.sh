@@ -45,15 +45,17 @@
 #    today, unchanged, regardless of which of the 4 hosts is running it. A
 #    host's own native value always wins over the file.
 #
-# 2. Optional Kalilix tool provisioning (tool_provisioning=kalilix).
-#    Wraps the final exec in `nix develop kalilix#kali --command` so
-#    every execute_command call for the rest of the session has real
-#    pentest tools (nmap/sqlmap/hydra/etc.) on PATH - see
-#    skills/tool-management/SKILL.md and tools/clicky-setup.sh. Always
-#    probed first and never allowed to prevent the gateway server from
-#    starting - a Kalilix problem degrades to "whatever's already on
-#    PATH," the same graceful-degradation posture tool-fallback.sh
-#    already has everywhere else in this repo.
+# 2. NOT Kalilix tool provisioning. This file used to resolve the Kalilix
+#    toolchain PATH before exec'ing the server; it no longer touches Nix at
+#    all. That work costs ~44s cold and sat inside the MCP client's server
+#    startup budget, where missing the deadline means "failed to connect"
+#    with no retry for the whole session. It is now resolved lazily by
+#    server.py on first execute_command, via scripts/toolchain-path.sh -
+#    see the "--- 2." section below for the full reasoning.
+#
+#    THE INVARIANT: this file does only what the server cannot speak MCP
+#    without - provision its venv, normalize config into the environment,
+#    exec. Everything else is lazy.
 #
 # Usage: launch.sh (no args; invoked by Claude Code itself via
 # mcpServers.clicky-gateway.command - see .claude-plugin/plugin.json - or
@@ -61,7 +63,64 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# --- Resolve this script's REAL location, through symlinks ----------------
+#
+# This file is the `clicky-gateway` launcher: installers symlink it onto
+# PATH (~/.local/bin/clicky-gateway -> <repo>/skills/mcp-gateway/scripts/
+# launch.sh) so every generated per-CLI config can say
+# `command = "clicky-gateway"` instead of baking in an absolute path.
+#
+# That matters for more than tidiness. Every MCP client's documented
+# convention is that `command` is a NAME RESOLVED ON PATH - the canonical
+# example in the MCP docs is `"command": "npx"`, with absolute paths
+# appearing only in `args`, and the same docs rule out relative paths
+# outright ("absolute and not relative"). Following the convention makes
+# the generated configs byte-identical on every machine, which in turn
+# means:
+#   - no contributor's home directory is committed to this repo (the
+#     checked-in artifacts previously embedded the generating machine's
+#     absolute path in 23 tracked files),
+#   - tests/cli_targets/'s drift check compares like with like, so it can
+#     actually pass anywhere other than the machine that last generated,
+#   - moving or re-cloning the repo no longer requires regenerating.
+#
+# But `${BASH_SOURCE[0]}` is the SYMLINK path when invoked that way, so a
+# plain `dirname` would resolve to ~/.local/bin and every
+# "$SCRIPT_DIR/../.."-relative lookup below would miss. Walk the symlink
+# chain to the real file first.
+#
+# Uses a readlink loop rather than `readlink -f`/`realpath`: neither is
+# available on macOS's stock BSD userland, which this repo explicitly
+# supports (see the bash 3.2 notes elsewhere in this file).
+_resolve_self() {
+    local src="${BASH_SOURCE[0]}" dir
+    while [ -L "$src" ]; do
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        # A relative symlink target resolves against the link's own
+        # directory, not the current working directory.
+        case "$src" in
+            /*) ;;
+            *) src="$dir/$src" ;;
+        esac
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR="$(_resolve_self)"
+
+# skills/mcp-gateway/scripts -> repo root. Derived, never hardcoded, so
+# this launcher is correct from any clone location without regeneration.
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+# Claude Code sets CLAUDE_PLUGIN_ROOT natively. The other three hosts have
+# no equivalent - which is exactly why the generator used to inject it as
+# a literal absolute path into their configs. Deriving it here removes
+# that need entirely: every host gets it, and none of them has to know a
+# path. A host's own value always wins.
+: "${CLAUDE_PLUGIN_ROOT:=$REPO_ROOT}"
+export CLAUDE_PLUGIN_ROOT
+
 BASE_DIR="${CLAUDE_PLUGIN_DATA:-/tmp/clicky-mcp-gateway-data}"
 VENV_DIR="$BASE_DIR/venv"
 CLICKY_CONFIG="${CLICKY_CONFIG_PATH:-$HOME/.clicky/config.json}"
@@ -136,21 +195,32 @@ PYEOF
     rm -f "$ENV_NORMALIZE_TMP"
 fi
 
-# --- 2. Optional Kalilix tool provisioning -----------------------------
+# --- 2. Kalilix tool provisioning is NOT resolved here --------------------
 #
-# kalilix#kali is the registry shortcut (tools/clicky-setup.sh registers
-# it via `nix registry add kalilix github:scopecreep-zip/kalilix`) -
-# deliberately not a bare github:scopecreep-zip/kalilix#kali URL, per
-# Kalilix's own documented "regular use" pattern, avoiding a fresh
-# branch-ref resolution on every gateway launch.
-if [ "${CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING:-none}" = "kalilix" ]; then
-    if ! command -v nix >/dev/null 2>&1; then
-        echo "WARNING: tool_provisioning=kalilix but 'nix' is not on PATH - agents will only see tools already on PATH. Run tools/clicky-setup.sh to set this up." >&2
-    elif ! nix develop kalilix#kali --command true >/dev/null 2>&1; then
-        echo "WARNING: tool_provisioning=kalilix but 'nix develop kalilix#kali' failed (registry shortcut not set up, network issue, or a broken flake). Run tools/clicky-setup.sh to fix this. Falling back to tools already on PATH." >&2
-    else
-        exec nix develop kalilix#kali --command "$VENV_DIR/bin/python" "$SCRIPT_DIR/../server.py" "$@"
-    fi
-fi
+# It used to be. Resolving the Kalilix toolchain PATH costs ~44s on a cold
+# cache, and doing it here put that cost inside the MCP client's server-STARTUP
+# budget: Claude Code applies a startup timeout (MCP_TIMEOUT; the
+# documentation's own example is 10000ms) to stdio MCP servers, reports one
+# that misses it as "failed to connect", and does NOT retry it for the rest of
+# the session. Because every Clicky agent holds only gateway tools, a single
+# missed startup left a whole engagement running against agents with no tools,
+# degrading silently rather than stopping. The cache key includes flake.nix, so
+# this re-colded on every plugin update - a recurring failure, not a first-run
+# one.
+#
+# Nothing here needs those tools. The only consumer is execute_command's
+# subprocess inside server.py, and a tool call has an entirely different
+# budget: MCP_TOOL_TIMEOUT defaults to ~28 hours when unset, and stdio servers
+# have no per-request timer at all. So server.py resolves it lazily, on first
+# use, via skills/mcp-gateway/scripts/toolchain-path.sh, and memoizes it.
+#
+# THE INVARIANT THIS FILE NOW HOLDS: the startup path contains only work
+# without which the server cannot speak MCP - provisioning the venv it runs in,
+# and normalizing config into the environment. Everything else is lazy.
+# tests/mcp_gateway/test_launch.sh enforces this by stripping comments from
+# this file and asserting that no remaining EXECUTABLE line mentions nix,
+# print-dev-env or the toolchain. (The words appear above, in prose, on
+# purpose - the reasoning has to live somewhere.)
+
 
 exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/../server.py" "$@"

@@ -31,7 +31,7 @@
 # reported plainly if missing, not silently assumed.
 #
 # Usage:
-#   tools/clicky-setup.sh             # the 4-step guided flow
+#   tools/clicky-setup.sh             # the 5-step guided flow
 #   tools/clicky-setup.sh --advanced  # per-agent framework/model assignment (needs python3)
 #
 set -uo pipefail
@@ -82,6 +82,307 @@ LIX_INSTALL_CMD='curl -sSf -L https://install.lix.systems/lix | sh -s -- install
 
 CODEX_INSTALL_CMD="npm install -g @openai/codex@latest"
 
+# --- [1/5] Required dependencies + gateway provisioning ------------------
+#
+# This step exists because of a real, total outage on a fresh Kali install
+# (python3.13, no python3.13-venv package): the clicky-gateway MCP server
+# failed to start for every session, and nothing in the install process
+# ever said so. The operator only found out when /clicky:pentest dispatched
+# a recon-agent that had zero working tools - because all 8 Clicky agents
+# are provisioned with the gateway's tools and nothing else, a dead gateway
+# is a dead framework, not a degraded one.
+#
+# Two distinct gaps are closed here:
+#
+#   1. jq was an undeclared hard dependency. 17 scripts shell out to it,
+#      including session-management/scripts/session-manager.sh (which
+#      create_session itself calls) and report-generation/scripts/
+#      report-generator.sh. The wizard previously only used jq as an
+#      optional nicety for settings.json sync and degraded gracefully when
+#      it was absent, which made it look far more optional than it is.
+#
+#   2. Nothing ever verified the gateway could actually be provisioned.
+#      This step now RUNS provision-venv.sh rather than checking for
+#      by-products of it, because "the venv directory exists" was exactly
+#      the assumption that let the original bug hide - see that script's
+#      "Why the health check is not just..." header note.
+
+REQUIRED_MISSING=()
+GATEWAY_READY="false"
+
+# Where rootless fallback installs land. On PATH by default on most Linux
+# distributions (Debian/Kali's /etc/skel/.profile, systemd's user
+# environment) and on macOS under Homebrew-managed shells.
+CLICKY_LOCAL_BIN="${CLICKY_LOCAL_BIN:-$HOME/.local/bin}"
+
+# jq is pinned rather than floating, and verified against the SHA-256 sums
+# jq publishes with that exact release. Hardcoding the digests (instead of
+# fetching sha256sum.txt alongside the binary) is what makes this check
+# meaningful: a digest downloaded from the same place as the artifact
+# authenticates nothing. This defends against a corrupted/truncated
+# download and a tampered mirror or MITM. It does not defend against a
+# compromised upstream release - nothing at this layer could.
+JQ_PINNED_VERSION="1.7.1"
+_jq_expected_sha256() {
+    case "$1" in
+        jq-linux-amd64) echo "5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5" ;;
+        jq-linux-arm64) echo "4dd2d8a0661df0b22f1bb9a1f9830f06b6f3b8f7d91211a1ef5d7c4f06a8b4a5" ;;
+        jq-macos-amd64) echo "4155822bbf5ea90f5c79cf254665975eb4274d426d0709770c21774de5407443" ;;
+        jq-macos-arm64) echo "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a" ;;
+        *) echo "" ;;
+    esac
+}
+
+_jq_asset_name() {
+    local os arch
+    case "$(uname -s)" in
+        Linux) os="linux" ;;
+        Darwin) os="macos" ;;
+        *) echo ""; return ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo ""; return ;;
+    esac
+    echo "jq-${os}-${arch}"
+}
+
+_sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else echo ""
+    fi
+}
+
+# Package-manager install line, used for the sudo path and for the
+# last-resort message.
+_install_hint() {
+    local pkg="$1"
+    if command -v apt >/dev/null 2>&1; then echo "sudo apt install -y $pkg"
+    elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install -y $pkg"
+    elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S --noconfirm $pkg"
+    elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install -y $pkg"
+    elif command -v brew >/dev/null 2>&1; then echo "brew install $pkg"
+    else echo "install '$pkg' with your system package manager"
+    fi
+}
+
+# True when we can install a system package without stopping to prompt for
+# a password - i.e. already root, or sudo is cached/NOPASSWD.
+_can_sudo_noninteractive() {
+    [ "$(id -u)" = "0" ] && return 0
+    command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+# Install jq without requiring root, by fetching the official pinned static
+# binary. This is the difference between a preflight that reports a problem
+# and one that resolves it: jq is a hard dependency of 17 scripts (including
+# session-manager.sh, which create_session itself calls), and on a locked-
+# down box `sudo apt install jq` may simply not be available to the
+# operator. A single statically-linked binary needs no root and no runtime
+# deps.
+_install_jq_rootless() {
+    local asset expected tmp actual
+    asset="$(_jq_asset_name)"
+    [ -n "$asset" ] || { echo "  (no prebuilt jq for $(uname -s)/$(uname -m))"; return 1; }
+    expected="$(_jq_expected_sha256 "$asset")"
+    [ -n "$expected" ] || { echo "  (no pinned checksum for $asset)"; return 1; }
+    command -v curl >/dev/null 2>&1 || { echo "  (curl unavailable - cannot fetch jq)"; return 1; }
+
+    tmp="$(mktemp)"
+    if ! curl -sSL --max-time 120 -o "$tmp" \
+        "https://github.com/jqlang/jq/releases/download/jq-${JQ_PINNED_VERSION}/${asset}"; then
+        echo "  (download failed)"
+        rm -f "$tmp"
+        return 1
+    fi
+
+    actual="$(_sha256_of "$tmp")"
+    if [ -z "$actual" ]; then
+        echo "  (no sha256sum/shasum available to verify the download - refusing to install an unverified binary)"
+        rm -f "$tmp"
+        return 1
+    fi
+    if [ "$actual" != "$expected" ]; then
+        echo "  (CHECKSUM MISMATCH for $asset - refusing to install)"
+        echo "     expected: $expected"
+        echo "     actual:   $actual"
+        rm -f "$tmp"
+        return 1
+    fi
+
+    mkdir -p "$CLICKY_LOCAL_BIN"
+    # 755, not `chmod +x` - mktemp creates at 600, so `+x` would yield a
+    # confusing 711 (executable but unreadable to group/other).
+    chmod 755 "$tmp"
+    mv "$tmp" "$CLICKY_LOCAL_BIN/jq" || { rm -f "$tmp"; return 1; }
+    # Make it usable for the remainder of THIS wizard run even if the
+    # operator's PATH doesn't include CLICKY_LOCAL_BIN yet.
+    case ":$PATH:" in
+        *":$CLICKY_LOCAL_BIN:"*) ;;
+        *) export PATH="$CLICKY_LOCAL_BIN:$PATH" ;;
+    esac
+    command -v jq >/dev/null 2>&1
+}
+
+# Resolve one missing dependency. Package manager first (keeps the system
+# coherent), rootless fallback second where one exists.
+_resolve_dep() {
+    local dep="$1"
+    if _can_sudo_noninteractive; then
+        echo "  + $(_install_hint "$dep")"
+        eval "$(_install_hint "$dep")" >/dev/null 2>&1
+        command -v "$dep" >/dev/null 2>&1 && return 0
+    fi
+    if [ "$dep" = "jq" ]; then
+        echo "  + installing jq ${JQ_PINNED_VERSION} to $CLICKY_LOCAL_BIN (no root needed, checksum-verified)"
+        _install_jq_rootless && return 0
+    fi
+    return 1
+}
+
+preflight() {
+    # Test/CI escape hatch. This step is the only one that installs
+    # software and touches the network, which makes it incompatible with
+    # the offline, PATH-restricted fixtures in tests/setup_wizard/ that
+    # cover steps 2-5. Those set CLICKY_PREFLIGHT=off; preflight has its
+    # own dedicated coverage in that same suite. Never set this in normal
+    # operator use - skipping it is what let the original dead-gateway bug
+    # reach an engagement unnoticed.
+    if [ "${CLICKY_PREFLIGHT:-on}" = "off" ]; then
+        return
+    fi
+
+    _header "1/5" "Checking required dependencies"
+
+    REQUIRED_MISSING=()
+    local dep
+    for dep in bash python3 curl jq; do
+        if command -v "$dep" >/dev/null 2>&1; then
+            echo "  $dep: $(command -v "$dep")"
+        else
+            echo "  $dep: MISSING"
+            REQUIRED_MISSING+=("$dep")
+        fi
+    done
+
+    if [ "${#REQUIRED_MISSING[@]}" -gt 0 ]; then
+        echo
+        echo "  Resolving missing dependencies..."
+        local still=()
+        for dep in "${REQUIRED_MISSING[@]}"; do
+            if _resolve_dep "$dep"; then
+                echo "    $dep: installed ($(command -v "$dep"))"
+            else
+                still+=("$dep")
+            fi
+        done
+        REQUIRED_MISSING=("${still[@]+"${still[@]}"}")
+
+        # Only fall back to asking the operator for what genuinely could not
+        # be resolved automatically (curl and python3 can't be bootstrapped
+        # without a package manager, and sudo may need a password).
+        if [ "${#REQUIRED_MISSING[@]}" -gt 0 ]; then
+            echo
+            echo "  Could not install automatically: ${REQUIRED_MISSING[*]}"
+            echo "  These need elevated privileges. Run:"
+            for dep in "${REQUIRED_MISSING[@]}"; do
+                echo "    $(_install_hint "$dep")"
+            done
+            echo
+            if _confirm "  Run the above now (you'll be prompted for your password)?"; then
+                for dep in "${REQUIRED_MISSING[@]}"; do
+                    echo "  + $(_install_hint "$dep")"
+                    eval "$(_install_hint "$dep")" || echo "    (failed - install '$dep' by hand)"
+                done
+                still=()
+                for dep in "${REQUIRED_MISSING[@]}"; do
+                    command -v "$dep" >/dev/null 2>&1 || still+=("$dep")
+                done
+                REQUIRED_MISSING=("${still[@]+"${still[@]}"}")
+            fi
+        fi
+    fi
+
+    # A rootless jq install is only useful if the scripts that need it can
+    # find it. Most distros already have this on PATH; say so explicitly
+    # when they don't, because the symptom otherwise shows up much later as
+    # session-manager.sh failing on a fresh engagement.
+    if [ -x "$CLICKY_LOCAL_BIN/jq" ]; then
+        case ":${PATH}:" in
+            *":$CLICKY_LOCAL_BIN:"*) ;;
+            *)
+                echo
+                echo "  NOTE: jq is installed at $CLICKY_LOCAL_BIN/jq but that directory is"
+                echo "  not on your PATH. Add this to your shell profile:"
+                echo "      export PATH=\"\$HOME/.local/bin:\$PATH\""
+                ;;
+        esac
+    fi
+
+    # --- Install the clicky-gateway launcher onto PATH -------------------
+    #
+    # Every generated per-CLI config (.codex/agents/*.toml,
+    # .github/agents/*.md, opencode.json) registers the MCP server as the
+    # bare name `clicky-gateway`, resolved on PATH - the convention every
+    # MCP client documents, and what keeps those checked-in files free of
+    # any machine-specific absolute path. This is what makes that name
+    # resolve. See GATEWAY_COMMAND in tools/generate-cli-targets.py.
+    #
+    # A symlink rather than a copy, so the launcher never goes stale
+    # against the repo. launch.sh walks the symlink back to its real
+    # location to find the repo root.
+    echo
+    echo "  Installing the clicky-gateway launcher..."
+    local launcher_target="$REPO_ROOT/skills/mcp-gateway/scripts/launch.sh"
+    if [ -f "$launcher_target" ]; then
+        mkdir -p "$CLICKY_LOCAL_BIN"
+        if ln -sf "$launcher_target" "$CLICKY_LOCAL_BIN/clicky-gateway"; then
+            echo "  Launcher: $CLICKY_LOCAL_BIN/clicky-gateway -> $launcher_target"
+            case ":$PATH:" in
+                *":$CLICKY_LOCAL_BIN:"*) ;;
+                *) export PATH="$CLICKY_LOCAL_BIN:$PATH" ;;
+            esac
+        else
+            echo "  Launcher: FAILED to symlink into $CLICKY_LOCAL_BIN"
+        fi
+    else
+        echo "  Launcher: SKIPPED (launch.sh not found at $launcher_target)"
+    fi
+
+    # --- Provision the gateway for real ---------------------------------
+    echo
+    echo "  Provisioning the MCP gateway (creates a Python venv, installs 'mcp')..."
+    local provision="$REPO_ROOT/skills/mcp-gateway/scripts/provision-venv.sh"
+    if [ ! -x "$provision" ] && [ ! -f "$provision" ]; then
+        echo "  Gateway: SKIPPED (provision-venv.sh not found at $provision)"
+        return
+    fi
+
+    # Same data dir the plugin itself uses, so this provisions the real
+    # venv rather than a throwaway the operator never benefits from.
+    local plugin_data="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/clicky-clicky}"
+    mkdir -p "$plugin_data"
+
+    local provision_log
+    provision_log="$(mktemp)"
+    if CLAUDE_PLUGIN_DATA="$plugin_data" bash "$provision" >"$provision_log" 2>&1; then
+        local venv_dir="$plugin_data/venv"
+        if "$venv_dir/bin/python3" -c "import mcp" >/dev/null 2>&1; then
+            GATEWAY_READY="true"
+            echo "  Gateway: READY ($venv_dir)"
+        else
+            echo "  Gateway: FAILED - venv provisioned but 'import mcp' does not work"
+        fi
+    else
+        echo "  Gateway: FAILED"
+        echo
+        sed 's/^/    /' "$provision_log"
+    fi
+    rm -f "$provision_log"
+}
+
 _header() {
     echo
     echo "[$1] $2"
@@ -98,14 +399,53 @@ _confirm() {
     esac
 }
 
-# --- [1/4] Detect --------------------------------------------------------
+# --- [2/5] Detect --------------------------------------------------------
 
 CLI_CLAUDE=""; CLI_OPENCODE=""; CLI_CODEX=""; CLI_COPILOT=""
 FOUND_TOOLS_COUNT=0
 NIX_PRESENT="false"
+NIX_BIN=""
+
+# `command -v nix` alone is NOT a reliable test for "is Nix installed."
+# Both the Nix and Lix installers put nix on PATH via /etc/profile.d/nix.sh,
+# which is sourced by LOGIN shells only - so on a correctly installed
+# multi-user Nix box, a script run from a non-login shell finds nothing.
+#
+# This caused a silent, total loss of tool provisioning in the wild: the
+# operator installed Nix and registered Kalilix through this very wizard,
+# `nix develop kalilix#kali` genuinely worked, and Clicky still ran every
+# agent with none of the toolkit - because both this file and
+# skills/mcp-gateway/scripts/launch.sh concluded "nix is not on PATH."
+# Keep this in sync with launch.sh's copy of _find_nix().
+# Colon-separated candidate list, overridable. Tests need this: because
+# this function deliberately looks OUTSIDE PATH, restricting PATH no
+# longer isolates a "Nix is not installed" fixture, and without an
+# override tests/setup_wizard/ would detect the developer's real Nix and
+# go on to do real work (registering the flake, pre-warming the store) in
+# a suite documented as never touching the real system. Set it to empty
+# to simulate a machine with no Nix. Uses ${VAR-default}, not ${VAR:-...},
+# so an explicitly-empty value is honored rather than replaced.
+CLICKY_NIX_CANDIDATES="${CLICKY_NIX_CANDIDATES-/nix/var/nix/profiles/default/bin/nix:$HOME/.nix-profile/bin/nix:/run/current-system/sw/bin/nix:/usr/local/bin/nix}"
+
+_find_nix() {
+    if command -v nix >/dev/null 2>&1; then
+        command -v nix
+        return 0
+    fi
+    local candidate
+    local IFS=':'
+    for candidate in $CLICKY_NIX_CANDIDATES; do
+        [ -n "$candidate" ] || continue
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
 detect() {
-    _header "1/4" "Detecting your environment"
+    _header "2/5" "Detecting your environment"
 
     CLI_CLAUDE="$(command -v claude 2>/dev/null || true)"
     CLI_OPENCODE="$(command -v opencode 2>/dev/null || true)"
@@ -117,8 +457,15 @@ detect() {
         command -v "$t" >/dev/null 2>&1 && FOUND_TOOLS_COUNT=$((FOUND_TOOLS_COUNT + 1))
     done
 
-    if command -v nix >/dev/null 2>&1; then
+    if NIX_BIN="$(_find_nix)"; then
         NIX_PRESENT="true"
+        # Nix is routinely installed but absent from a non-login shell's
+        # PATH (see _find_nix). Put it on PATH for the rest of this run so
+        # every later `nix registry`/`nix develop` call here works.
+        case ":$PATH:" in
+            *":$(dirname "$NIX_BIN"):"*) ;;
+            *) export PATH="$(dirname "$NIX_BIN"):$PATH" ;;
+        esac
     fi
 
     echo "  Platform: $(uname -s) $(uname -m)"
@@ -140,12 +487,12 @@ detect() {
     fi
 }
 
-# --- [2/4] Pentest tools (Kalilix) ---------------------------------------
+# --- [3/5] Pentest tools (Kalilix) ---------------------------------------
 
 TOOL_PROVISIONING="none"
 
 offer_kalilix() {
-    _header "2/4" "Pentest tools (Kalilix)"
+    _header "3/5" "Pentest tools (Kalilix)"
     echo "  Clicky can give agents a real, reproducible pentest toolkit -"
     echo "  ${#KALILIX_TOOLS[@]} tools (nmap, sqlmap, hydra, metasploit, and more) via"
     echo "  Kalilix (github.com/scopecreep-zip/kalilix), a Nix flake. No manual"
@@ -182,6 +529,14 @@ offer_kalilix() {
                             "$HOME/.nix-profile/etc/profile.d/nix.sh"; do
                 [ -f "$profile" ] && . "$profile" 2>/dev/null
             done
+            # Fall back to the canonical install locations too - sourcing
+            # the profile scripts above is not sufficient on every layout.
+            if NIX_BIN="$(_find_nix)"; then
+                case ":$PATH:" in
+                    *":$(dirname "$NIX_BIN"):"*) ;;
+                    *) export PATH="$(dirname "$NIX_BIN"):$PATH" ;;
+                esac
+            fi
             if ! command -v nix >/dev/null 2>&1; then
                 echo "  Nix installed but not yet on PATH in this shell - re-run this wizard in a new terminal to continue."
                 TOOL_PROVISIONING="none"
@@ -246,12 +601,12 @@ offer_kalilix() {
     TOOL_PROVISIONING="kalilix"
 }
 
-# --- [3/4] Cross-provider severity review --------------------------------
+# --- [4/5] Cross-provider severity review --------------------------------
 
 SEVERITY_REVIEW_STATUS="fallback"
 
 offer_codex_for_severity_review() {
-    _header "3/4" "Cross-checked severity scoring"
+    _header "4/5" "Cross-checked severity scoring"
     echo "  Clicky's severity-analyst-agent double-checks a report's severity"
     echo "  ratings using a SECOND, independent AI provider (Codex/GPT) rather than"
     echo "  reviewing itself. Research this design is based on found that"
@@ -308,7 +663,7 @@ offer_codex_for_severity_review() {
     SEVERITY_REVIEW_STATUS="needs_auth"
 }
 
-# --- [4/4] Apply ----------------------------------------------------------
+# --- [5/5] Apply ----------------------------------------------------------
 
 # Reads one string/number/boolean value for `key` out of our OWN,
 # known-flat-shape config.json - safe to do with grep/sed here
@@ -453,7 +808,7 @@ sync_codex_registration() {
 }
 
 apply_all() {
-    _header "4/4" "Applying configuration"
+    _header "5/5" "Applying configuration"
     write_clicky_config "$TOOL_PROVISIONING"
 
     if [ -n "$CLI_CLAUDE" ]; then
@@ -478,6 +833,37 @@ apply_all() {
     else
         echo "  - copilot not detected, skipping"
     fi
+
+    # --- Warm the gateway's toolchain cache (optional) ------------------
+    #
+    # Runs LAST, after write_clicky_config above: the toolchain cache only
+    # exists once tool_provisioning=kalilix is actually on disk, so warming
+    # earlier would silently no-op.
+    #
+    # This is a convenience, NOT a precondition. The gateway resolves the
+    # Kalilix toolchain lazily on first use (server.py, via
+    # skills/mcp-gateway/scripts/toolchain-path.sh), so /pentest works whether
+    # or not this ran - an earlier revision warmed here to stop the gateway
+    # being reported as "failed to connect", which is no longer how that
+    # failure is prevented. All warming buys now is that an operator's FIRST
+    # command is fast instead of paying a one-time ~45s resolve.
+    local toolchain="$REPO_ROOT/skills/mcp-gateway/scripts/toolchain-path.sh"
+    if [ "$GATEWAY_READY" = "true" ] && [ -f "$toolchain" ] && [ "$TOOL_PROVISIONING" = "kalilix" ]; then
+        echo
+        echo "  Warming the Kalilix toolchain cache (one-time, can take ~45s)..."
+        local plugin_data="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/clicky-clicky}"
+        local warm_log
+        warm_log="$(mktemp)"
+        if CLAUDE_PLUGIN_DATA="$plugin_data" CLAUDE_PLUGIN_OPTION_TOOL_PROVISIONING=kalilix \
+             bash "$toolchain" --refresh >/dev/null 2>"$warm_log"; then
+            echo "  Toolchain cache: warm ✓ (your first command will be fast)"
+        else
+            echo "  Toolchain cache: not warmed - this is not a problem. Clicky will"
+            echo "  resolve it on first use instead; that one command will just be slower."
+            sed 's/^/    /' "$warm_log" | tail -3
+        fi
+        rm -f "$warm_log"
+    fi
 }
 
 print_summary() {
@@ -485,6 +871,18 @@ print_summary() {
     echo "============================================================"
     echo "Done."
     echo "============================================================"
+    # Gateway status leads, because unlike everything else in this summary
+    # it is pass/fail rather than better/worse: with a dead gateway every
+    # agent dispatch gets an agent with no tools at all.
+    if [ "$GATEWAY_READY" = "true" ]; then
+        echo "  MCP gateway:      ready ✓"
+    else
+        echo "  MCP gateway:      NOT READY - Clicky cannot run until this is fixed"
+    fi
+    if [ "${#REQUIRED_MISSING[@]}" -gt 0 ]; then
+        echo "  Required deps:    MISSING - ${REQUIRED_MISSING[*]}"
+    fi
+
     if [ "$TOOL_PROVISIONING" = "kalilix" ]; then
         echo "  Pentest tools:    Kalilix enabled - agents get the real toolkit"
     else
@@ -508,10 +906,19 @@ print_summary() {
     echo "  Advanced: assign specific agents to specific frameworks/models with:"
     echo "    tools/clicky-setup.sh --advanced"
     echo
-    echo "  Run /pentest <target> to get started."
+    if [ "$GATEWAY_READY" = "true" ]; then
+        echo "  Restart your CLI host, then run /pentest <target> to get started."
+        echo "  (Claude Code attempts the MCP connection once at session start and"
+        echo "   does not retry, so a gateway provisioned just now needs a restart.)"
+    else
+        echo "  Do NOT run /pentest yet - fix the gateway above first, then re-run"
+        echo "  this wizard. Running it with a dead gateway produces agents with no"
+        echo "  tools, which fail in confusing ways rather than saying what's wrong."
+    fi
 }
 
 run_default_flow() {
+    preflight
     detect
     offer_kalilix
     offer_codex_for_severity_review

@@ -23,6 +23,8 @@ run() {
 
 run "bash syntax" "$HERE/syntax/check_bash_syntax.sh"
 run "python syntax" "$HERE/syntax/check_python_syntax.sh"
+run "javascript syntax" "$HERE/syntax/check_js_syntax.sh"
+run "javascript syntax checker has teeth (fixtures: rejects broken workflows and broken ESM)" "$HERE/syntax/test_js_syntax_check.sh"
 run "prompt-injection-probe canary detection (real mock HTTP server)" "$HERE/prompt_injection/test_prompt_injection_probe.sh"
 
 if python3 -c "import jsonschema" 2>/dev/null; then
@@ -43,10 +45,14 @@ run "severity-review-logger mechanical slop_score recomputation (fixtures)" "$HE
 run "severity-calibration-aggregator (fixtures)" "$HERE/severity_calibration/test_severity_calibration_aggregator.sh"
 run "tls-scan.sh (real self-signed server + testssl/sslscan/nmap fixtures)" "$HERE/tls_scan/test_tls_scan.sh"
 run "security-headers-check.sh (real mock HTTP server)" "$HERE/security_headers/test_security_headers_check.sh"
+run "ssh-spray.py end-to-end (REAL SSH server: finds creds, clean-negative vs UNTESTED exit codes, survives throttling)" "$HERE/ssh_spray/test_ssh_spray.sh"
+run "coverage catalog drift (generated from the vendored OWASP WSTG checklist)" python3 "$HERE/../tools/generate-coverage-catalog.py" --check
+run "engagement-state (attack tree evidence gates, WSTG coverage ledger, credential-attack preconditions)" "$HERE/engagement_state/test_engagement_state.sh"
 run "mcp-gateway suite (token_store/scope_gate/provision-venv/launch.sh + live MCP protocol check)" "$HERE/mcp_gateway/run_tests.sh"
 run "OpenCode target generation (drift check + live permission-resolution check if opencode is installed)" "$HERE/cli_targets/test_opencode_generation.sh"
 run "Codex CLI target generation (drift check + TOML/structural validation)" "$HERE/cli_targets/test_codex_generation.sh"
 run "Copilot CLI target generation (drift check + frontmatter/structural validation)" "$HERE/cli_targets/test_copilot_generation.sh"
+run "no leaked absolute paths in checked-in generated artifacts (privacy + cross-machine drift)" "$HERE/cli_targets/test_no_leaked_paths.sh"
 run "clicky-setup.sh wizard (stubbed nix/codex/CLI binaries, no real system touched)" "$HERE/setup_wizard/test_clicky_setup.sh"
 
 exit $FAILED

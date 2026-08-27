@@ -88,8 +88,17 @@ for path in md_files:
     else:
         print(f"PASS: {label} tools: allowlist references clicky-gateway")
 
-    # Confirmed live via real schema-validation errors: both fields are
-    # required on the embedded mcp-servers.clicky-gateway struct.
+    # `args` and `tools` are required on the embedded
+    # mcp-servers.clicky-gateway struct - each caught by a real Copilot CLI
+    # schema-validation error (see this file's header).
+    #
+    # `env.CLAUDE_PLUGIN_ROOT` was previously asserted here too, but it was
+    # never a Copilot schema requirement - it was a Clicky-internal one, and
+    # the only reason the generator had to embed an absolute repo path in
+    # every checked-in agent file. launch.sh now resolves its own symlink to
+    # derive the repo root and exports CLAUDE_PLUGIN_ROOT itself, so no host
+    # config supplies it, and these artifacts carry no machine-specific path
+    # at all. See tests/cli_targets/test_no_leaked_paths.sh.
     if "mcp-servers:" not in fm:
         print(f"FAIL: {label} has no embedded mcp-servers block (workspace .mcp.json is confirmed broken - github/copilot-cli#3126 - this must be embedded per-agent)")
         failed = True
@@ -98,17 +107,26 @@ for path in md_files:
         missing = []
         if "args:" not in mcp_block:
             missing.append("args")
-        if "tools:" not in mcp_block.split("env:")[0] if "env:" in mcp_block else "tools:" not in mcp_block:
+        if "tools:" not in mcp_block:
             missing.append("tools (server-level)")
         if "command:" not in mcp_block:
             missing.append("command")
-        if "env:" not in mcp_block or "CLAUDE_PLUGIN_ROOT" not in mcp_block:
-            missing.append("env.CLAUDE_PLUGIN_ROOT")
         if missing:
-            print(f"FAIL: {label} mcp-servers.clicky-gateway missing confirmed-required field(s): {missing}")
+            print(f"FAIL: {label} mcp-servers.clicky-gateway missing schema-required field(s): {missing}")
             failed = True
         else:
-            print(f"PASS: {label} mcp-servers.clicky-gateway has all confirmed-required fields")
+            print(f"PASS: {label} mcp-servers.clicky-gateway has all schema-required fields")
+
+        # The command must be the PATH-resolved launcher name, never a
+        # filesystem path - the convention every MCP client documents.
+        if "clicky-gateway" not in mcp_block.split("command:")[1].split("\n")[0]:
+            print(f"FAIL: {label} command is not the PATH-resolved 'clicky-gateway' name")
+            failed = True
+        elif "launch.sh" in mcp_block or "/Users/" in mcp_block or "/home/" in mcp_block:
+            print(f"FAIL: {label} embeds a filesystem path in its mcp-servers block")
+            failed = True
+        else:
+            print(f"PASS: {label} registers the gateway by PATH-resolved name, no filesystem path")
 
     agent_name_match = re.search(r"You are ([\w-]+)\.", text)
     if agent_name_match:
