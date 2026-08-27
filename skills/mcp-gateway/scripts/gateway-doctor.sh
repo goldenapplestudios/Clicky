@@ -169,6 +169,37 @@ elif [ "$FAILED" -ne 0 ]; then
     say "  SKIP  MCP handshake not attempted - fix the failures above first"
 fi
 
+# --- CVP org binding (informational, never fails the check) ----------------
+# Anthropic's real-time cyber safeguards gate offensive dual-use work
+# per-ORGANIZATION; a Cyber Verification Program approval is scoped to a
+# specific org UUID. On a real engagement, offensive subagents were terminated
+# mid-run with a [cyber] error while the session's org was not the approved
+# one. Surface the org so the operator can confirm it instead of guessing.
+say ""
+say "Cyber Verification Program (org binding):"
+_claude_json="${HOME}/.claude.json"
+if [ -f "$_claude_json" ] && command -v python3 >/dev/null 2>&1; then
+    _org=$(python3 -c 'import json,sys
+try:
+    a = json.load(open(sys.argv[1])).get("oauthAccount", {})
+    uuid = a.get("organizationUuid") or "?"
+    label = a.get("organizationName") or a.get("emailAddress") or "?"
+    print(f"{uuid}  ({label})")
+except Exception:
+    print("")' "$_claude_json" 2>/dev/null)
+    if [ -n "$_org" ]; then
+        say "  authenticated org: $_org"
+        say "  CVP is org-scoped: confirm THIS org is your approved one. If offensive"
+        say "  subagents are terminated with a [cyber] error even though you are"
+        say "  approved, the approval is likely bound to a different org (switch with"
+        say "  /login) or still propagating - it is not a gateway fault."
+    else
+        say "  could not read org from $_claude_json (informational only)"
+    fi
+else
+    say "  (skipped: no $_claude_json or python3 - informational only)"
+fi
+
 say ""
 if [ "$FAILED" -eq 0 ]; then
     say "HEALTHY: the gateway is reachable and exposes its tools."

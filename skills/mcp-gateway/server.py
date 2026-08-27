@@ -592,6 +592,19 @@ def create_session(target: str, objective: str = "", caller: str = "") -> dict:
         ).start()
         state_init.append("toolchain=warming")
 
+    # Surface the authenticated org so the operator can confirm CVP binding at
+    # session start. Anthropic's cyber safeguards gate offensive work
+    # per-organization; a mismatch shows up as [cyber] terminations of
+    # dispatched subagents (not as a gateway fault). Informational, never raises.
+    try:
+        _cj = Path(os.path.expanduser("~/.claude.json"))
+        if _cj.is_file():
+            _org_uuid = json.loads(_cj.read_text()).get("oauthAccount", {}).get("organizationUuid")
+            if _org_uuid:
+                state_init.append(f"cvp_org={_org_uuid}")
+    except Exception:
+        pass
+
     _trace(
         session_dir,
         event="tool_call",
