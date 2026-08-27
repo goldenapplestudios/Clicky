@@ -105,6 +105,71 @@
           config.allowUnfree = true;
         };
 
+        # nuclei's TEMPLATES, pinned as data alongside the nuclei binary.
+        #
+        # nuclei ships NO templates inside its own package - the binary and
+        # the ~13k-template detection library are two separate nixpkgs
+        # derivations. Without the library, `nuclei` runs but matches
+        # nothing: with no ~/nuclei-templates on disk it aborts with
+        # "no templates provided for scan", and nuclei-scan.sh passes -duc
+        # (disable-update-check), which - correctly, to keep engagements
+        # reproducible and offline - suppresses the auto-download that would
+        # otherwise paper over the gap. The net effect on a freshly
+        # Kalilix-provisioned host is the worst failure mode this repo has a
+        # standing rule against: the entire templated-vulnerability stage
+        # silently produces an empty result that reads as "found nothing"
+        # rather than "did not run". Observed live: the stage returned zero
+        # findings on a target later confirmed vulnerable to CVE-2025-55182
+        # (RSC unauthenticated RCE, CVSS 10.0), purely because no templates
+        # were present.
+        #
+        # Pinning the templates here makes them part of the same reproducible,
+        # flake.lock-pinned toolchain as every other tool, updated only by an
+        # explicit `nix flake update` - exactly the posture the header
+        # describes for nuclei itself. nuclei-scan.sh reads NUCLEI_TEMPLATES_PATH
+        # (exported on the shell below) and builds ABSOLUTE -t paths from it,
+        # so template resolution never depends on nuclei's own writable-home
+        # default and works against a read-only /nix/store path. When the env
+        # var is unset (e.g. tool_provisioning != kalilix, operator-managed
+        # templates), the script falls back to its previous relative-path
+        # behavior unchanged.
+        # nuclei's env var for a custom templates location is
+        # NUCLEI_TEMPLATES_PATH - this is the name ProjectDiscovery documents
+        # (https://docs.projectdiscovery.io/tools/nuclei/... configuration ->
+        # environment-variables: "NUCLEI_TEMPLATES_PATH: Override the default
+        # templates directory location"). Exporting the tool's OWN var means
+        # nuclei itself resolves templates from the pinned store path, in
+        # addition to nuclei-scan.sh reading the same var to build absolute
+        # -t paths.
+        nucleiTemplates = pkgs.nuclei-templates;
+        nucleiTemplatesPath = "${nucleiTemplates}/share/nuclei-templates";
+
+        # SecLists + rockyou - the wordlists Clicky's credential/fuzzing paths
+        # assume are present.
+        #
+        # Same failure class as nuclei's templates: the config defaults
+        # (default_password_wordlist, default_username_wordlist) and several
+        # scripts hardcode /usr/share/wordlists/rockyou.txt and
+        # /usr/share/wordlists/seclists/..., which DO NOT EXIST on a host
+        # provisioned purely from this flake (Kalilix ships no SecLists). A
+        # credential-cracking or fuzzing step then either aborts or silently
+        # tests nothing - the "missing resource reads as a negative result"
+        # trap. Observed live: an offline MD5 crack had no wordlist on PATH
+        # and had to source rockyou from an out-of-band local SecLists copy.
+        #
+        # rockyou: use nixpkgs' dedicated `rockyou` package, which ships a
+        # ready-to-use UNCOMPRESSED share/wordlists/rockyou.txt. (The raw
+        # `seclists` package deliberately ships rockyou as a .tar.gz - see
+        # nixpkgs issue #329862 "not able to extract archived resources as
+        # rockyou.txt" - so consuming seclists directly would require an
+        # extraction step; the `rockyou` package is the maintained answer to
+        # exactly that, so we don't hand-roll one.) `seclists` is still pinned
+        # for every OTHER list (usernames, discovery, etc.), exposed as
+        # CLICKY_SECLISTS_DIR.
+        seclists = pkgs.seclists;
+        seclistsDir = "${seclists}/share/wordlists/seclists";
+        rockyouPath = "${pkgs.rockyou}/share/wordlists/rockyou.txt";
+
         # Tools Clicky's scripts invoke that Kalilix's #kali shell does not
         # provide. Every entry is referenced by a real script in this repo -
         # see the per-tool rationale in the header comment above.
@@ -168,6 +233,23 @@
           inputsFrom = [ kalilix.devShells.${system}.kali ];
 
           packages = clickyExtraTools;
+
+          # Pinned nuclei template library. Set as a plain shell env var (not
+          # a PATH entry - templates are data, not an executable), so
+          # `nix print-dev-env --json` serialises it under `variables` and
+          # launch.sh's toolchain resolution carries it into
+          # execute_command's subprocess environment exactly like PATH.
+          # nuclei's own documented var (see nucleiTemplates note above);
+          # nuclei-scan.sh reads it too, to build absolute -t paths.
+          NUCLEI_TEMPLATES_PATH = nucleiTemplatesPath;
+
+          # Pinned SecLists tree + the uncompressed rockyou from pkgs.rockyou.
+          # Same transport as NUCLEI_TEMPLATES_PATH: env vars serialised by
+          # `print-dev-env --json` and carried into execute_command's
+          # subprocess. Wordlist-consuming scripts read these; see the
+          # seclists note above.
+          CLICKY_SECLISTS_DIR = seclistsDir;
+          CLICKY_ROCKYOU = rockyouPath;
         };
       in
       {

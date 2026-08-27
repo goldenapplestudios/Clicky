@@ -9,6 +9,16 @@
 
 set -euo pipefail
 
+# Wordlist referenced in the emitted crack commands: the flake-pinned rockyou,
+# exported as CLICKY_ROCKYOU by the toolchain shell (see flake.nix). The
+# commands below embed the *literal* $CLICKY_ROCKYOU reference rather than its
+# expanded value, so they resolve in whatever toolchain shell actually runs
+# them and this suggestion-printer takes no load-time dependency on the var
+# (it must keep working under `set -u` to print usage on any host, including a
+# non-kalilix one where the var is unset). Single source, no /usr/share
+# fallback: on a flake-provisioned host that path does not exist.
+ROCKYOU='$CLICKY_ROCKYOU'
+
 # Common hash-type name -> hashcat -m mode number
 hashcat_mode() {
     case "$(echo "$1" | tr 'A-Z' 'a-z')" in
@@ -49,7 +59,7 @@ do_hashcat() {
     echo "Prepared: $clean_file ($(wc -l < "$clean_file" | tr -d ' ') hash(es))"
     echo
     echo "Run with:"
-    echo "  hashcat -m $mode -a 0 \"$clean_file\" /usr/share/wordlists/rockyou.txt"
+    echo "  hashcat -m $mode -a 0 \"$clean_file\" $ROCKYOU"
     echo "  hashcat -m $mode -a 3 \"$clean_file\" '?a?a?a?a?a?a'   # brute force, 6 chars, all charsets"
 }
 
@@ -66,10 +76,10 @@ do_john() {
     echo
     if [ -n "$format" ]; then
         echo "Run with:"
-        echo "  john --format=$format --wordlist=/usr/share/wordlists/rockyou.txt \"$clean_file\""
+        echo "  john --format=$format --wordlist=$ROCKYOU \"$clean_file\""
     else
         echo "No format specified - john will attempt auto-detection. Run with:"
-        echo "  john --wordlist=/usr/share/wordlists/rockyou.txt \"$clean_file\""
+        echo "  john --wordlist=$ROCKYOU \"$clean_file\""
         echo "If auto-detection picks the wrong format, list candidates with:"
         echo "  john --list=formats | grep -i <hint>"
     fi
@@ -79,7 +89,15 @@ do_john() {
 }
 
 main() {
-    local mode="${1:?Usage: $0 {hashcat|john} <hash_file> <hash_type_or_format>}"
+    # NB: the usage string must NOT live inside a ${1:?...} default - the
+    # literal '}' in "{hashcat|john}" terminates the parameter expansion
+    # early, so `mode` captured the whole tail and every subcommand fell
+    # through to "Unknown mode". Check arity explicitly instead.
+    if [ "$#" -lt 1 ]; then
+        echo "Usage: $0 {hashcat|john} <hash_file> <hash_type_or_format>" >&2
+        exit 1
+    fi
+    local mode="$1"
     shift
     case "$mode" in
         hashcat) do_hashcat "$@" ;;

@@ -2,7 +2,7 @@
   "name": "clicky",
   "displayName": "Clicky",
   "description": "Multi-agent penetration testing framework: orchestrates specialized agents through recon, exploitation, privilege escalation, and looting using attack-priority logic that self-calibrates from the operator's own accumulated session history, with an honest heuristic fallback until enough data exists.",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "author": {
     "name": "Kali Jackson"
   },
