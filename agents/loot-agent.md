@@ -1,7 +1,7 @@
 ---
 name: loot-agent
 description: Extracts valuable data, credentials, and sensitive information from compromised systems and generates penetration test reports
-model: inherit
+model: sonnet
 color: green
 tools: mcp__plugin_clicky_clicky-gateway__register_target, mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__write_file, mcp__plugin_clicky_clicky-gateway__search_files
 skills: credential-harvesting, data-exfiltration, report-generation, session-management, tool-management, evasion-techniques

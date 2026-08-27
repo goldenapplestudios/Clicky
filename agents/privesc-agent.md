@@ -1,7 +1,7 @@
 ---
 name: privesc-agent
 description: Escalates privileges from low-privilege user to root/administrator through SUID binaries, sudo misconfigurations, and kernel exploits
-model: inherit
+model: sonnet
 color: yellow
 tools: mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__write_file, mcp__plugin_clicky_clicky-gateway__search_files
 skills: linux-privesc, windows-privesc, container-security, active-directory, credential-harvesting, session-management, persistence-techniques, tool-management, evasion-techniques

@@ -1,7 +1,7 @@
 ---
 name: cloud-recon-agent
 description: Performs cloud infrastructure reconnaissance and enumeration for AWS, Azure, and GCP including S3 buckets and metadata endpoints
-model: inherit
+model: sonnet
 color: cyan
 tools: mcp__plugin_clicky_clicky-gateway__register_target, mcp__plugin_clicky_clicky-gateway__execute_command, mcp__plugin_clicky_clicky-gateway__fetch_url, mcp__plugin_clicky_clicky-gateway__read_file, mcp__plugin_clicky_clicky-gateway__search_files
 skills: cloud-infrastructure, container-security, api-security-testing, osint-gathering, credential-harvesting, session-management, tool-management
