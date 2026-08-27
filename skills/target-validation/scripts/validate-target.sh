@@ -146,6 +146,40 @@ validate_hostname() {
         return 1
     fi
 
+    # A single-label name with no dot ("doing", "webserver") is either a real
+    # internal host or - far more often - a stray word that reached this script
+    # as a mis-parsed argument. The regex above cannot tell those apart, so it
+    # used to accept BOTH: an operator who typed
+    #   /pentest <10.0.0.1> [From doing some recon ...]
+    # instead of substituting the argument-hint placeholders had "doing" bound
+    # to $target, validated clean as VALID_HOSTNAME, and watched an entire
+    # engagement configure itself around a word from their own sentence.
+    #
+    # Resolution is the discriminator that costs nothing and is never wrong in
+    # the dangerous direction: a real internal host resolves, a typo does not.
+    # Dotted names are left alone - they are unambiguous in shape, and a
+    # not-yet-registered or split-horizon domain is a legitimate target.
+    if [[ "$hostname" != *.* ]]; then
+        if command -v getent >/dev/null 2>&1; then
+            getent hosts "$hostname" >/dev/null 2>&1 && return 0
+        elif command -v host >/dev/null 2>&1; then
+            host "$hostname" >/dev/null 2>&1 && return 0
+        elif command -v nslookup >/dev/null 2>&1; then
+            nslookup "$hostname" >/dev/null 2>&1 && return 0
+        else
+            # No resolver available: cannot discriminate, so do not block.
+            return 0
+        fi
+        echo "ERROR: '$hostname' is a single-label name that does not resolve."
+        echo "  If you meant an IP or domain, pass it directly:"
+        echo "    /clicky:pentest 10.10.10.10 \"optional context\""
+        echo "  Do not type the argument-hint brackets themselves - '<IP or domain>'"
+        echo "  and '[\"additional context\"]' are placeholders to replace, and typing"
+        echo "  them literally can bind a word from your sentence as the target."
+        echo "  If this really is an internal host, make it resolvable (or use its IP)."
+        return 1
+    fi
+
     return 0
 }
 
