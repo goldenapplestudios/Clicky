@@ -341,7 +341,11 @@ class TokenStore:
                 add(m.group(0), "cred_hash", span)
 
         if _extract_from_text is not None:
-            for value in _extract_from_text(text):
+            # mode="output": this is command OUTPUT, not a command. A false
+            # positive here is not one wasted scope check - it mints a
+            # permanent token and rewrites that string in every later result,
+            # reports included. See extract_from_text's docstring.
+            for value in _extract_from_text(text, mode="output"):
                 if value in seen or _OWN_TOKEN_RE.match(value):
                     continue
                 seen.add(value)

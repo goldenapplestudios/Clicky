@@ -108,7 +108,47 @@ EXT_BLOCKLIST = {
 }
 
 
-def extract_from_text(text: str) -> set:
+# IPv4 glued to letters/hyphens is a version string, not an address:
+# "net-snmp-5.9.5.2-bin" is syntactically a valid dotted quad, and
+# ipaddress.ip_address() happily accepts it. A real address in output text is
+# delimited by whitespace or punctuation like ':' '(' ',' - never welded to a
+# word. Used by output mode only; command mode keeps the permissive match.
+_IPV4_GLUE_BEFORE = re.compile(r'[A-Za-z_-]$')
+_IPV4_GLUE_AFTER = re.compile(r'^[A-Za-z_-]')
+
+# IPv6 shapes that are never a scan target but do match the coarse regex.
+_IPV6_NOISE = {"::", ":::", "::0", "0::"}
+
+
+def extract_from_text(text: str, mode: str = "command") -> set:
+    """Pull candidate targets out of `text`.
+
+    `mode` selects the policy, because the two callers have opposite cost
+    models for a false positive:
+
+      "command" (default) - scanning a shell command before running it, to
+        scope-check what it touches. A false positive costs one extra
+        scope-validator.sh call, so over-matching is the safe direction and
+        this stays deliberately permissive (see the module docstring).
+
+      "output" - scanning command OUTPUT for values to tokenize
+        (token_store.redact()). Here a false positive is NOT cheap: it mints
+        a permanent token and then rewrites that string everywhere it appears
+        for the rest of the engagement, including in client-facing reports.
+        Observed live: one engagement minted 337 tokens for a single-target
+        scan - 257 of them two-character fragments of /nix/store hashes
+        matched as "hostnames", plus version strings that parse as IPv4
+        ("net-snmp-5.9.5.2") and a bare "0" from "[exit 0]". Output that read
+        "OpenSSH 9.6p1" came back as "OpenSSH 9.TARGET_84".
+
+    So output mode drops the single-label bare-hostname pass entirely (a
+    no-dot word in arbitrary output is not identifiable as a host), requires
+    IPv4 not to be welded to surrounding word characters, and rejects IPv6
+    noise shapes. Dotted hostnames and well-delimited IPs - the values that
+    actually matter for privacy - are still caught.
+    """
+    if mode not in ("command", "output"):
+        raise ValueError(f"extract_from_text: unknown mode {mode!r}")
     candidates = set()
     # Spans already claimed by a higher-confidence pattern (URL host, IPv4/
     # IPv6, dotted hostname) below, so the bare-hostname pass at the end
@@ -129,6 +169,10 @@ def extract_from_text(text: str) -> set:
     for m in IPV4_RE.finditer(text):
         occupied.append(m.span())
         val = m.group(0)
+        if mode == "output":
+            start, end = m.span()
+            if _IPV4_GLUE_BEFORE.search(text[:start][-1:]) or _IPV4_GLUE_AFTER.match(text[end:end + 1]):
+                continue
         try:
             if "/" in val:
                 ipaddress.ip_network(val, strict=False)
@@ -142,6 +186,8 @@ def extract_from_text(text: str) -> set:
         occupied.append(m.span())
         val = m.group(0)
         if val.count(":") < 2:
+            continue
+        if mode == "output" and (val in _IPV6_NOISE or not any(c in "0123456789abcdefABCDEF" for c in val)):
             continue
         try:
             ipaddress.ip_address(val.split("/")[0])
@@ -167,7 +213,12 @@ def extract_from_text(text: str) -> set:
     leading = re.match(r'\s*\S+', text)
     leading_end = leading.end() if leading else 0
 
-    for m in BARE_HOSTNAME_RE.finditer(text):
+    # Single-label bare hostnames are command-mode only. In a shell command
+    # "dc01" is plausibly a target; in arbitrary output it is indistinguishable
+    # from a hash fragment, a filename, or a column header - and this pass is
+    # what minted 257 junk tokens from /nix/store paths in one session.
+    bare_iter = () if mode == "output" else BARE_HOSTNAME_RE.finditer(text)
+    for m in bare_iter:
         span = m.span()
         if span[0] < leading_end:
             continue

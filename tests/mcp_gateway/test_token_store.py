@@ -272,6 +272,65 @@ def test_concurrent_registration_is_safe():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_redact_does_not_tokenize_output_noise():
+    """redact() must not mint tokens for text that merely LOOKS target-shaped.
+
+    Regression for a real corruption. extract-targets.py is deliberately
+    permissive because its original caller scope-checks shell commands, where
+    a false positive costs one wasted check. redact() is a second caller with
+    the opposite cost model: a false positive mints a PERMANENT token and then
+    rewrites that string in every later result, client-facing reports included.
+
+    Observed live before the fix: a single-target engagement minted 337 tokens.
+    257 were two-character fragments of /nix/store hashes matched as bare
+    hostnames; version strings that parse as valid dotted quads
+    ("net-snmp-5.9.5.2") were tokenized as addresses; and "[exit 0]" became
+    "[exit TARGET_307]". Rendered output read "OpenSSH 9.TARGET_84".
+    """
+    noise = [
+        ("[exit 0]", "a bare exit code"),
+        ("/nix/store/s4qk35irdiqna4h2mkhgg2q6b3fx1wz5-net-snmp-5.9.5.2-bin/bin/snmpwalk",
+         "nix store path with a version that parses as IPv4"),
+        ("OpenSSH_9.6p1 Ubuntu-3ubuntu13.16", "an ssh version banner"),
+        ('counts: {"exhausted":1,"open":3,"untested":2}', "json counts"),
+        ("total 44 drwxrwxr-x 2 howzor howzor 4096", "ls -l output"),
+    ]
+    for text, label in noise:
+        tmp, store = with_tmp_store()
+        try:
+            out = store.redact(text)
+            check(f"redact leaves {label} untouched", out, text)
+            minted = len(store._load()["tokens"])
+            check_true(f"no token minted from {label}", minted == 0, f"minted {minted}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_redact_still_tokenizes_real_targets():
+    """The inverse: tightening discovery must not stop it catching real hosts.
+
+    A newly-seen host in scan output still has to become a token - that is the
+    whole point of auto-discovery, and it is what keeps a pivot target from
+    leaking into the model as a raw value.
+    """
+    real = [
+        ("Nmap scan report for 10.129.55.61", "10.129.55.61", "a bare IPv4"),
+        ("Host: 10.129.55.61:3000 open", "10.129.55.61", "IPv4 followed by a port"),
+        ("fetching https://api.example.com/v1", "api.example.com", "a dotted hostname"),
+        ("neighbour 2001:db8::1 reachable", "2001:db8::1", "an IPv6 address"),
+    ]
+    for text, value, label in real:
+        tmp, store = with_tmp_store()
+        try:
+            out = store.redact(text)
+            check_true(f"{label} is still tokenized", value not in out, f"got: {out}")
+            check_true(f"{label} produced a TARGET_ token", "TARGET_" in out, f"got: {out}")
+            check_true(f"{label} round-trips back", store.resolve(out) == text,
+                       f"resolve gave: {store.resolve(out)}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     test_register_dedup_and_sequential_numbering()
     test_register_unknown_kind_raises()
@@ -283,6 +342,8 @@ def main() -> int:
     test_redact_then_resolve_round_trip()
     test_file_permissions_are_0600()
     test_concurrent_registration_is_safe()
+    test_redact_does_not_tokenize_output_noise()
+    test_redact_still_tokenizes_real_targets()
 
     print()
     print("=== SUMMARY ===")
