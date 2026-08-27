@@ -503,6 +503,49 @@ chmod +s /tmp/.backdoor
 # Access: /tmp/.backdoor -p
 ```
 
+## Pre-Root Observability (when a root-triggered action silently fails)
+
+A recurring wall: you have a low-priv foothold, you trigger something that runs
+as root (a cron job, an incron/inotify hook, a setuid helper, a root service),
+and it **silently does nothing** - and you cannot tell why, because the logs that
+would explain it (`/var/log/messages`, `/var/log/cron`, `/var/log/secure`,
+journald) are all root-only. Do not burn hours guessing. Get signal first:
+
+```bash
+# 1. What logs can THIS user actually read? (adm/systemd-journal group help)
+id; find /var/log -readable -type f 2>/dev/null
+journalctl -n 20 --no-pager 2>&1 | head      # works if in systemd-journal group
+getfacl /var/log/messages 2>/dev/null         # an ACL may grant read you didn't expect
+
+# 2. Make the ROOT action observable from YOUR side instead of reading its log.
+#    A root process's stderr is not yours - but its *effects* are. Have the thing
+#    you trigger write a marker to a world-writable path as its FIRST action, so
+#    "ran" vs "did not run" is unambiguous and separate from "ran but errored":
+: > /tmp/.probe; chmod 666 /tmp/.probe        # pre-create world-writable
+# ...then make the root-run payload do:  echo "ran $(id)" >> /tmp/.probe  as line 1.
+
+# 3. Distinguish "the mechanism did not fire" from "it fired but a check failed".
+#    E.g. incron/inotify hooks often unlink their trigger file when consumed -
+#    a consumed trigger proves the root process RAN even if your payload didn't.
+ls -la <watched_dir>/                          # is the trigger gone? -> it ran
+
+# 4. Reproduce the privileged code path AS YOUR USER to read its errors directly.
+#    Many root helpers are readable scripts; run the same script by hand as your
+#    low-priv user - its stderr comes back to you, and "passes as me, fails as
+#    root" localizes the problem to a uid-dependent step (perms, gpg trustdb
+#    ownership, a socket you can't reach), not to your payload.
+<the same helper> <same args> 2>&1 | tail
+
+# 5. Timing as a signal: a fast failure is usually a rejected check; a ~N-second
+#    stall before nothing happens is usually a hang/timeout (a network callout,
+#    a pinentry/agent wait) - measure it before theorizing.
+```
+
+The core rule: **do not attribute a silent failure to your exploit until you have
+made the root action observable and reproduced its code path as your own user.**
+A misread "it didn't work" here is what turns a 20-minute privesc into a
+multi-hour rabbit hole.
+
 ## Best Practices
 
 1. **Run enumeration scripts first** - They catch most vectors

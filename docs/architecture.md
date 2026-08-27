@@ -683,6 +683,38 @@ Everything else this section used to describe — timeouts, per-agent temperatur
 
 ## Security Model
 
+### Two operating modes (privacy + safeguards)
+
+Clicky can run in two postures, and it is worth being explicit about which one
+you are in, because they have different privacy and cyber-safeguard properties:
+
+1. **Consumer-account mode (the default).** Clicky runs against a personal
+   Claude account, and the **MCP privacy gateway is the privacy control**: raw
+   target and credential values are resolved only inside the gateway process and
+   are redacted to `TARGET_n`/`CRED_*_n` tokens before anything reaches the
+   model. This is a genuine control, but it is a *workaround for not having tenant
+   isolation* - and it is subject to Anthropic's real-time cyber safeguards. Those
+   safeguards gate high-risk dual-use work (exploitation, credential attacks) and
+   can still interrupt an approved operator (see the [per-agent model](#agent-models-whats-actually-configurable)
+   note - offensive agents pin a less-strict tier for exactly this reason, and
+   `gateway-doctor.sh` surfaces the authenticated org so a CVP mismatch is
+   visible).
+
+2. **CVP + API/tenant mode (higher assurance).** The field-standard architecture
+   for autonomous pentesting (XBOW, pentestkit, etc.) runs each job in an
+   **isolated, disposable sandbox** where exploitation touches the target but not
+   the host, with data/prompts/findings kept in the operator's own tenant - and
+   the org is enrolled in Anthropic's **Cyber Verification Program** so dual-use
+   work is not gated per-request. In this posture the token gateway matters less
+   for privacy (the tenant boundary already provides it) and the safeguard
+   friction is lower. Clicky's gateway design is compatible with this mode but
+   does not by itself provide the sandbox isolation; that is an infrastructure
+   layer around it.
+
+The tokenization gateway is therefore the right control for consumer-account use
+and *not* the higher-assurance option - it exists because the higher-assurance
+option (tenant isolation) isn't assumed to be present.
+
 ### What Clicky Will and Won't Do
 
 ```mermaid
