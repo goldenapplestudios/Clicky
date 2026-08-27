@@ -135,17 +135,62 @@ _TF_CLOUD_TOKEN_RE = re.compile(r"\batlasv1\.[A-Za-z0-9_-]{40,}\b")
 # Adapted from hash-identifier.py's PATTERNS (bcrypt / glibc crypt / bare
 # hex hash lengths). Order matters: more specific ($-prefixed) patterns
 # are tried first so a bare-hex pattern doesn't grab a substring of one.
+#
+# Two groups, on purpose. The $-prefixed / yescrypt shapes below are
+# unambiguously credential material - nothing benign looks like
+# "$6$salt$...". They tokenize unconditionally.
 _HASH_RES = [
     re.compile(r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}"),  # bcrypt
     re.compile(r"\$6\$[./A-Za-z0-9]{0,16}\$[./A-Za-z0-9]{1,86}"),  # sha512crypt
     re.compile(r"\$5\$[./A-Za-z0-9]{0,16}\$[./A-Za-z0-9]{1,43}"),  # sha256crypt
     re.compile(r"\$1\$[./A-Za-z0-9]{0,8}\$[./A-Za-z0-9]{22}"),  # md5crypt
     re.compile(r"\by\$[./A-Za-z0-9]+"),  # yescrypt tail, sans literal '$' start ambiguity
+]
+
+# BARE hex of a hash length is the over-tokenization hazard: GPG
+# fingerprints (40 hex), 16-hex key IDs, sha256sum/md5sum checksums, git
+# blob/commit hashes, and even flag strings all match by shape alone. On a
+# real engagement this minted a permanent token for every such value and
+# rewrote it in all later output ("OpenSSH 9.TARGET_84"). So these tokenize
+# ONLY when the surrounding text actually reads like a credential dump -
+# see _bare_hex_is_credential() below.
+_BARE_HEX_HASH_RES = [
     re.compile(r"\b[A-Fa-f0-9]{128}\b"),  # SHA-512
     re.compile(r"\b[A-Fa-f0-9]{64}\b"),  # SHA-256
     re.compile(r"\b[A-Fa-f0-9]{40}\b"),  # SHA-1
     re.compile(r"\b[A-Fa-f0-9]{32}\b"),  # MD5 or NTLM
 ]
+
+# Positive credential cues in the ~64 chars before a bare-hex match.
+_CRED_CONTEXT_RE = re.compile(
+    r"password|passwd|\bpwd\b|\bhash\b|nt[\s_-]?hash|lm[\s_-]?hash|\bntlm\b|"
+    r"\bsecret\b|krbtgt|mscash|net-ntlm|\bshadow\b",
+    re.IGNORECASE,
+)
+# Non-credential cues that VETO tokenization even when a positive cue (e.g.
+# "hash") is also present - these are the exact benign hex sources that bit
+# us: GPG fingerprints/key-ids, sha*/md5 message digests and checksums, git
+# commit/blob ids, ETags. Checked first, so "hash=sha256 ... <hex>" (a file
+# digest) stays untokenized while "found hash: <hex>" (the loot case the
+# existing test covers) still tokenizes.
+_NONCRED_CONTEXT_RE = re.compile(
+    r"fingerprint|checksum|\bsha\d*sum\b|\bmd5sum\b|\bsha\d*\b|\bmd5\b|"
+    r"\bblake\d*\b|\bcrc\d*\b|digest|signedwith|key[\s_-]?id|\bfpr\b|"
+    r"\bcommit\b|\bblob\b|\betag\b|content-|integrity|\bversion\b|sigstore",
+    re.IGNORECASE,
+)
+
+
+def _bare_hex_is_credential(text: str, span: tuple[int, int]) -> bool:
+    """True only when a bare-hex hash sits in a real credential context - a
+    password/NTLM/secret/hash keyword nearby - and NOT next to a
+    checksum/fingerprint/digest/version cue. A bare hex with no such context
+    (a GPG fingerprint, a checksum, a flag string) is left alone: explicitly
+    registered creds still tokenize; this gates only auto-discovery."""
+    window = text[max(0, span[0] - 64):span[0]]
+    if _NONCRED_CONTEXT_RE.search(window):
+        return False
+    return bool(_CRED_CONTEXT_RE.search(window))
 
 # Our own minted token names (e.g. "TARGET_1", "CRED_HASH_3") must never be
 # treated as newly-discovered values by _discover() - without this guard,
@@ -337,6 +382,19 @@ class TokenStore:
             for m in pat.finditer(text):
                 span = m.span()
                 if overlaps(span):
+                    continue
+                add(m.group(0), "cred_hash", span)
+
+        # Bare-hex hashes tokenize only in a real credential context - a
+        # length-alone match is far more often a fingerprint/checksum/flag
+        # (see _bare_hex_is_credential). Explicitly-registered creds still
+        # tokenize regardless; this gates only auto-discovery.
+        for pat in _BARE_HEX_HASH_RES:
+            for m in pat.finditer(text):
+                span = m.span()
+                if overlaps(span):
+                    continue
+                if not _bare_hex_is_credential(text, span):
                     continue
                 add(m.group(0), "cred_hash", span)
 

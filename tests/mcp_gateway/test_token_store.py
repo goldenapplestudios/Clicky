@@ -331,6 +331,47 @@ def test_redact_still_tokenizes_real_targets():
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_redact_does_not_over_tokenize_technical_strings():
+    """Non-secret technical strings that merely LOOK hash- or IP-shaped must
+    not be minted as tokens - the over-tokenization the operator hit on a real
+    engagement (GPG fingerprint -> CRED_HASH, 'FreePBX 16.0.40.7' -> TARGET).
+    Bare-hex hashes tokenize only in a credential context; dotted-quad version
+    strings are not treated as addresses.
+    """
+    leave_alone = [
+        ("Key fingerprint = 0BDE0BFA09946D732091E26E1588A7366BD35B34", "a GPG fingerprint"),
+        ("[GNUPG:] VALIDSIG " + "A" * 40 + " 2026", "a gpg VALIDSIG hex"),
+        ("signedwith=1588A7366BD35B34", "a 16-hex key id"),
+        ("sha256sum: " + "d" * 64 + "  release.tar.gz", "a sha256 checksum"),
+        ("hash=sha256 /usr/local/asterisk/pwn = " + "e" * 64, "a sig-file digest"),
+        ("FreePBX 16.0.40.7 is licensed under the", "a 4-part version string"),
+        ("running OpenSSH_9.6p1 on the host", "an OpenSSH version"),
+        ("root.txt: 5f6238f293a69bc1b1963b6c167ecdea", "a bare flag (no cred context)"),
+    ]
+    for text, label in leave_alone:
+        tmp, store = with_tmp_store()
+        try:
+            out = store.redact(text)
+            check_true(f"{label} is left untokenized", out == text, f"got: {out!r}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ...but real credential material and real targets STILL tokenize.
+    still_tokenize = [
+        ("shadow line root:$6$abc$" + "x" * 60 + ":19000:", "CRED_HASH", "a sha512crypt hash"),
+        ("found hash: " + "a1b2c3d4" * 5 + " for admin", "CRED_HASH", "a hash in credential context"),
+        ("password_hash: " + "f" * 32 + " stored", "CRED_HASH", "an MD5 in a password context"),
+        ("Nmap scan report for 10.129.245.100", "TARGET_", "a real target IP"),
+    ]
+    for text, prefix, label in still_tokenize:
+        tmp, store = with_tmp_store()
+        try:
+            out = store.redact(text)
+            check_true(f"{label} still tokenizes", prefix in out, f"got: {out!r}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     test_register_dedup_and_sequential_numbering()
     test_register_unknown_kind_raises()
@@ -344,6 +385,7 @@ def main() -> int:
     test_concurrent_registration_is_safe()
     test_redact_does_not_tokenize_output_noise()
     test_redact_still_tokenizes_real_targets()
+    test_redact_does_not_over_tokenize_technical_strings()
 
     print()
     print("=== SUMMARY ===")

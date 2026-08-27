@@ -119,6 +119,48 @@ _IPV4_GLUE_AFTER = re.compile(r'^[A-Za-z_-]')
 # IPv6 shapes that are never a scan target but do match the coarse regex.
 _IPV6_NOISE = {"::", ":::", "::0", "0::"}
 
+# Version-string vs IPv4 disambiguation (output mode only). A dotted quad
+# like "16.0.40.7" is a valid address by shape, so "FreePBX 16.0.40.7" got
+# minted as a target ("FreePBX TARGET_10") - the exact usability failure the
+# operator hit. Real addresses in output are introduced by punctuation or by
+# an IP-context word (host/target/for/inet/...); a product/name word
+# ("FreePBX", "Apache") before the quad marks a version instead. Kept
+# conservative so a real in-scope IP is never suppressed: only a name NOT in
+# _IP_INTRODUCER, or an explicit version keyword, or a 5th dotted component,
+# counts as a version.
+_VERSION_KEYWORD_RE = re.compile(r"(?:version|ver|rev|release|build|\bv)\s*$", re.IGNORECASE)
+_NAME_BEFORE_RE = re.compile(r"([A-Za-z][A-Za-z0-9+]*[A-Za-z])[/ ]$")
+_IP_INTRODUCER = {
+    "host", "hosts", "target", "targets", "server", "gateway", "address", "addr",
+    "ip", "inet", "inet6", "from", "to", "via", "peer", "router", "dns", "ns",
+    "nameserver", "for", "at", "on", "src", "dst", "source", "dest", "destination",
+    "proxy", "bind", "listening", "connect", "connected", "ping", "scan", "reach",
+}
+
+
+def _looks_like_version(text: str, start: int, end: int) -> bool:
+    """True when the dotted quad at [start:end] reads as a software version
+    rather than an address (output-mode heuristic - conservative on purpose:
+    suppressing a real target IP is a privacy failure, so this only fires on
+    an unambiguous version shape)."""
+    if text[end:end + 1] == "." and text[end + 1:end + 2].isdigit():
+        return True  # a 5th component -> not an IPv4 at all
+    before = text[:start]
+    if _VERSION_KEYWORD_RE.search(before[-16:]):
+        return True
+    m = _NAME_BEFORE_RE.search(before[-40:])
+    if not m:
+        return False
+    name = m.group(1)
+    # Only a PRODUCT identifier marks a version. A plain lowercase English
+    # word before a dotted quad ("against 10.10.10.99", "found 10.0.0.5") is
+    # prose around a real address - do NOT suppress it. A product name is
+    # mixed-case or digit-bearing ("FreePBX", "OpenSSH2"); IP-introducer words
+    # (host/target/for/...) are excluded even when capitalized.
+    if name.isalpha() and name.islower():
+        return False
+    return name.lower() not in _IP_INTRODUCER
+
 
 def extract_from_text(text: str, mode: str = "command") -> set:
     """Pull candidate targets out of `text`.
@@ -172,6 +214,8 @@ def extract_from_text(text: str, mode: str = "command") -> set:
         if mode == "output":
             start, end = m.span()
             if _IPV4_GLUE_BEFORE.search(text[:start][-1:]) or _IPV4_GLUE_AFTER.match(text[end:end + 1]):
+                continue
+            if _looks_like_version(text, start, end):
                 continue
         try:
             if "/" in val:

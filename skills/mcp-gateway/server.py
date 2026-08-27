@@ -801,6 +801,16 @@ async def register_target(
         return token
 
 
+# Prefer bash for command execution. shell=True with no executable= runs
+# /bin/sh, which on Kali/Debian is dash - and pentest one-liners routinely
+# use bashisms (arrays `a=(...)`, `${@:2}`, `${var:offset}`, process
+# substitution) that dash rejects with "Bad substitution"/"syntax error",
+# costing a wasted round-trip every time. Pin bash when present; fall back to
+# the platform default (None -> /bin/sh) when it isn't. shell=True +
+# executable= runs "<shell> -c <command>", the same contract either way.
+_SHELL_EXECUTABLE = "/bin/bash" if os.path.exists("/bin/bash") else None
+
+
 @mcp.tool()
 def execute_command(
     command: str, session_dir: str, timeout_s: int = 300, caller: str = ""
@@ -864,9 +874,16 @@ def execute_command(
         proc = subprocess.Popen(
             resolved,
             shell=True,
+            executable=_SHELL_EXECUTABLE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # errors="replace", not the default strict UTF-8: command output
+            # is frequently non-UTF-8 (hexdump, tcpdump -X, a compiled artifact,
+            # a mixed-encoding config). A strict decode raised UnicodeDecodeError
+            # inside communicate() and crashed the whole tool call - a hard
+            # failure, not a degraded result. read_file already uses replace.
+            errors="replace",
             start_new_session=True,
             env=subprocess_env,
         )

@@ -148,6 +148,26 @@ async def main() -> int:
                     "RESULT INCOMPLETE" not in bad,
                     bad[:200],
                 )
+
+                # --- 5: non-UTF-8 output must not crash the tool ----------
+                # Command output is frequently non-UTF-8 (hexdump, tcpdump -X,
+                # a compiled artifact). A strict decode raised UnicodeDecodeError
+                # inside the tool and killed the whole call; errors="replace"
+                # returns the output with replacement chars instead.
+                binout = await run(r"printf '\xff\xfe\xaf'; echo; echo TAIL_OK", 30)
+                check(
+                    "non-UTF-8 command output is returned, not a crash",
+                    "TAIL_OK" in binout and "[exit 0]" in binout,
+                    f"got: {binout[:200]!r}",
+                )
+
+                # --- 6: bashisms work (bash executable, not dash) --------
+                bashout = await run("arr=(a b c); echo GOT_${arr[1]}", 30)
+                check(
+                    "bash arrays work (execute_command runs bash, not dash)",
+                    "GOT_b" in bashout,
+                    f"got: {bashout[:200]!r}",
+                )
         return FAILED
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
