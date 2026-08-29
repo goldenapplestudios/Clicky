@@ -82,6 +82,7 @@ over MCP, the same as any other client would.)
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -195,6 +196,33 @@ def _scope_path(session_dir: str) -> str:
 
 
 _SCOPE_ENFORCEMENT_MODES = ("enforce", "warn", "off")
+
+
+# A name addresses a host; an address IS a host. That distinction is the whole
+# scope discriminator in register_target: a hostname learned from an
+# engagement's own traffic is another name for a host already authorized (the
+# packets still go to the authorized address, with the name only in the HTTP
+# Host header), while a newly discovered IP address is a genuinely new network
+# destination that has to clear the gate on its own.
+#
+# Deliberately does NOT resolve anything. Resolving to decide scope is a
+# documented DNS-rebinding TOCTOU (the check and the connection resolve
+# separately), and it cannot represent a name that does not resolve at all -
+# neither a dangling record in a subdomain-takeover finding, nor an /etc/hosts
+# style lab vhost like `connected.htb`.
+def _is_hostname(value: str) -> bool:
+    """True if `value` is a DNS name rather than a bare IP address."""
+    if not value:
+        return False
+    candidate = value.strip().rstrip(".")
+    try:
+        ipaddress.ip_address(candidate)
+        return False
+    except ValueError:
+        pass
+    if "/" in candidate or ":" in candidate:
+        return False  # CIDR / IPv6 / host:port - not a bare name
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+", candidate))
 
 
 def _scope_enforcement_mode() -> str:
@@ -753,6 +781,58 @@ async def register_target(
             )
 
         if classification == scope_gate.NOT_LISTED:
+            # A NAME for a host we are already authorized against is not a
+            # new asset - it is the same asset addressed differently, and it
+            # is not scope expansion.
+            #
+            # An engagement authorizes a HOST. `connected.htb` and
+            # `10.129.245.100` are one machine: the name exists only to
+            # address that machine's web server via the HTTP Host header, so
+            # testing it sends packets to the same authorized IP. Nothing new
+            # is contacted. skills/fuzzing/scripts/fuzz.sh proves the shape -
+            # `ffuf -u "$url" -H "Host: FUZZ.$domain"` takes the destination
+            # and the name as separate inputs. OWASP WSTG-INFO-04 states the
+            # expectation directly: given an IP as target, "it is expected
+            # that such an assignment would test all web applications
+            # accessible through this target," naming virtual hosts as one of
+            # the three ways one IP serves many applications.
+            #
+            # The discriminator is NAME vs ADDRESS, not "already known":
+            #   * a hostname learned from this engagement's own traffic is an
+            #     alias of the host it was learned from -> in scope, no ask;
+            #   * a newly discovered IP ADDRESS is a genuinely new network
+            #     destination -> the full gate still applies below.
+            # Provenance (we saw this name in this session's output) is also
+            # a safer signal than DNS resolution, which is a documented
+            # rebinding TOCTOU and cannot express a name that does not
+            # resolve at all - which is exactly `connected.htb`.
+            #
+            # Explicit out_of_scope is checked ABOVE and still denies
+            # absolutely; that hard boundary is unchanged.
+            existing = store.existing_token(target) if _is_hostname(target) else None
+            if existing is not None:
+                _log_scope_event(
+                    session_dir,
+                    f"ALIAS: '{target}' is a hostname learned from this "
+                    f"engagement's own traffic, already held as {existing}. "
+                    f"Treated as another name for an authorized host (Host-"
+                    f"header addressing reaches the same in-scope address), "
+                    f"not as a new asset. Recorded for the report.",
+                )
+                _trace(
+                    session_dir,
+                    event="tool_call",
+                    tool_name="register_target",
+                    caller=caller,
+                    tool_input={
+                        "target": existing,
+                        "mode": mode,
+                        "classification": "NOT_LISTED_ALREADY_KNOWN",
+                    },
+                    tool_result=existing,
+                )
+                return existing
+
             result = await ctx.elicit(
                 message=(
                     f"Target '{target}' is not explicitly listed in scope.json "

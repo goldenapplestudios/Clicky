@@ -196,7 +196,13 @@ def _bare_hex_is_credential(text: str, span: tuple[int, int]) -> bool:
 # treated as newly-discovered values by _discover() - without this guard,
 # redact() would try to re-register an already-redacted token as if it
 # were fresh loot the moment it saw its own output again.
-_OWN_TOKEN_RE = re.compile(r"^(?:TARGET|CRED_[A-Z]+)_\d+$")
+# Case-insensitive: a token used as a hostname comes back LOWERCASED by the
+# tools that handle it (DNS names and HTTP Host headers are case-normalized),
+# so `TARGET_5` reappears in output as `target_5`. Matched case-sensitively,
+# that looked like a brand-new hostname and was minted as TARGET_7 - the
+# gateway tokenizing its own token, observed live. Never re-mint our own
+# namespace, whatever case it comes back in.
+_OWN_TOKEN_RE = re.compile(r"^(?:TARGET|CRED_[A-Z]+)_\d+$", re.IGNORECASE)
 
 KIND_PREFIX = {
     "target": "TARGET",
@@ -295,6 +301,21 @@ class TokenStore:
             return token
 
         return self._with_lock(op)
+
+    def existing_token(self, real_value: str) -> str | None:
+        """Return the token already minted for `real_value`, else None.
+
+        A pure lookup with no side effects - unlike redact(), which mints a
+        token for an unknown value as a side effect of merely being called.
+        Callers that need to ask "has this value already entered this
+        session?" without changing anything must use this.
+        """
+        if not real_value:
+            return None
+        for token, entry in self._load()["tokens"].items():
+            if entry["value"] == real_value:
+                return token
+        return None
 
     def resolve(self, text: str) -> str:
         """Replace every known token in `text` with its real value."""

@@ -85,7 +85,13 @@ BARE_NOISE = {
 # looks like.
 URL_HOST_RE = re.compile(r'(?:https?|ftp)://(\[[0-9a-fA-F:]+\]|[^\s/:\'"\[]+)')
 
-NOISE = {"example.com", "example.org", "example.net", "localhost.localdomain"}
+NOISE = {
+    "example.com", "example.org", "example.net", "localhost.localdomain",
+    # Scanner-vendor domains printed in tool banners/footers, never the
+    # target. `nmap.org` is in the footer of every single nmap run and was
+    # minted as a target in a live engagement (TARGET_6).
+    "nmap.org", "insecure.org", "seclists.org",
+}
 
 # A bare (no-scheme) dotted token whose final label is one of these is
 # almost always a filename in a path or argument (login.php, dump.sql,
@@ -118,6 +124,38 @@ _IPV4_GLUE_AFTER = re.compile(r'^[A-Za-z_-]')
 
 # IPv6 shapes that are never a scan target but do match the coarse regex.
 _IPV6_NOISE = {"::", ":::", "::0", "0::"}
+
+_HEXCHARS = "0123456789abcdefABCDEF"
+_HEX_PAIR_RE = re.compile(r"^[0-9a-fA-F]{2}$")
+
+
+def _looks_like_colon_hex_id(text: str, start: int, end: int) -> bool:
+    """True for a key fingerprint / MAC-style colon-hex run misread as IPv6.
+
+    `12:41:55:26:9d:ad:3d:e8` is a syntactically valid IPv6 address, so
+    ipaddress.ip_address() accepts it - which is how every SSH host-key
+    fingerprint in an nmap banner got minted as a target in a live
+    engagement (TARGET_2/3/4). Two signals separate these from addresses:
+
+      * Clipping. IPV6_RE matches at most 8 groups, so a 16-group MD5
+        fingerprint is captured mid-run and the character just before or
+        after the match is still part of the same colon-hex sequence. A
+        real address is delimited by space/quote/bracket/slash.
+      * Uniform byte groups. Fingerprints and MACs are byte-wise, so every
+        group is exactly 2 hex digits. Real IPv6 has varied group widths
+        and usually `::` compression, so it survives this check.
+
+    Output mode only - `command` mode intentionally over-matches so scope
+    checking stays conservative.
+    """
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    if before == ":" or after == ":":
+        return True
+    if (before and before in _HEXCHARS) or (after and after in _HEXCHARS):
+        return True
+    groups = text[start:end].split("/")[0].split(":")
+    return len(groups) >= 4 and all(_HEX_PAIR_RE.match(g) for g in groups)
 
 # Version-string vs IPv4 disambiguation (output mode only). A dotted quad
 # like "16.0.40.7" is a valid address by shape, so "FreePBX 16.0.40.7" got
@@ -204,7 +242,12 @@ def extract_from_text(text: str, mode: str = "command") -> set:
         host = m.group(1).rstrip("/").lower()
         if host.startswith("[") and host.endswith("]"):
             host = host[1:-1]
-        if host:
+        # A URL host is trusted past EXT_BLOCKLIST (it is unambiguously a
+        # host, not a filename) but NOT past NOISE: scanner banners print
+        # their vendor URL ("see https://nmap.org"), which is a real host
+        # and still never the target. Output mode only - command mode keeps
+        # over-matching so scope checks stay conservative.
+        if host and not (mode == "output" and host in NOISE):
             url_hosts.add(host)
     candidates |= url_hosts
 
@@ -232,6 +275,8 @@ def extract_from_text(text: str, mode: str = "command") -> set:
         if val.count(":") < 2:
             continue
         if mode == "output" and (val in _IPV6_NOISE or not any(c in "0123456789abcdefABCDEF" for c in val)):
+            continue
+        if mode == "output" and _looks_like_colon_hex_id(text, m.start(), m.end()):
             continue
         try:
             ipaddress.ip_address(val.split("/")[0])

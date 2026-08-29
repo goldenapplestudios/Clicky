@@ -31,6 +31,7 @@ from pathlib import Path
 
 from mcp import StdioServerParameters, stdio_client
 from mcp.client.session import ClientSession
+from mcp.types import ElicitResult
 
 SERVER_PATH = sys.argv[1]
 
@@ -54,6 +55,24 @@ async def elicit_should_not_be_called(context, params):
     raise AssertionError(
         f"elicitation was triggered but this mode must never elicit: {params!r}"
     )
+
+
+def make_recording_elicit(record: list):
+    """An elicitation callback that RECORDS the ask and declines it.
+
+    Distinct from elicit_should_not_be_called, which raises: an exception in
+    the callback is an *unexpected internal error* to register_target, which
+    then fails open and registers the target anyway (its documented fail-open
+    behavior). That makes "raised" indistinguishable from "never asked" at the
+    tool result. Declining cleanly is a real operator decision, so the tool
+    refuses - letting a test assert separately on WHETHER it asked (the
+    record) and on what it did with the answer (is_error)."""
+
+    async def callback(context, params):
+        record.append(params.message)
+        return ElicitResult(action="decline")
+
+    return callback
 
 
 def tool_text(result) -> str:
@@ -164,6 +183,95 @@ async def check_enforce_agent_token_reregister_is_in_scope(tmp_root: str) -> Non
             )
 
 
+async def check_enforce_autodiscovered_host_does_not_elicit(tmp_root: str) -> None:
+    """Regression: the gateway mints TARGET_n by two paths, and they must not
+    disagree. redact()/_discover() mints promiscuously for PRIVACY (no scope
+    check, by design - an unredacted value must never reach the model), while
+    register_target is the AUTHORIZATION path. Live, a vhost found in scan
+    output was auto-minted as TARGET_5 and then an agent asking for that same
+    value's token was stopped by an elicitation on a host the session was
+    already working with - halting the autonomous run.
+
+    Part 1 asserts a value the privacy path already minted registers without
+    elicitation. Part 2 is the negative control: a genuinely novel host must
+    STILL elicit, proving the gate was made consistent, not disabled."""
+    tmp_dir = tempfile.mkdtemp(dir=tmp_root, prefix="autodiscovered-")
+    session_dir = make_session_dir(tmp_dir)
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_OPTION_SCOPE_ENFORCEMENT": "enforce",
+    }
+    params = StdioServerParameters(command=sys.executable, args=[SERVER_PATH], env=env)
+    asked: list = []
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(
+            read, write, elicitation_callback=make_recording_elicit(asked)
+        ) as session:
+            await session.initialize()
+            # 1) A hostname appears in command OUTPUT -> the privacy path mints
+            #    a token for it, with no scope check (that is by design).
+            ran = await session.call_tool(
+                "execute_command",
+                {
+                    "command": "echo 'Host: connected.htb responded'",
+                    "session_dir": str(session_dir),
+                },
+            )
+            ran_text = tool_text(ran)
+            check(
+                "output redaction auto-mints a token for a discovered host "
+                "(privacy path, unscoped by design)",
+                "connected.htb" not in ran_text and "TARGET_" in ran_text,
+                f"text={ran_text!r}",
+            )
+            # 2) An agent now asks for that same value's token. It is NOT_LISTED
+            #    in scope.json, but the session already works with it, so the
+            #    authorization path must not re-litigate -> no elicitation.
+            reg = await session.call_tool(
+                "register_target",
+                {"target": "connected.htb", "session_dir": str(session_dir)},
+            )
+            reg_text = tool_text(reg)
+            check(
+                "NOT_LISTED host already minted by output redaction registers "
+                "without elicitation (the autonomy stall)",
+                not reg.is_error
+                and reg_text.strip().startswith("TARGET_")
+                and asked == [],
+                f"isError={reg.is_error} text={reg_text!r} asked={asked!r}",
+            )
+            # 3) NEGATIVE CONTROL: a host never seen this session is genuinely
+            #    novel and must still elicit. elicit_should_not_be_called makes
+            #    that surface as an error - which is the PASS condition here.
+            novel = await session.call_tool(
+                "register_target",
+                {"target": "192.0.2.77", "session_dir": str(session_dir)},
+            )
+            check(
+                "a novel IP ADDRESS is a new network destination and STILL "
+                "elicits; a declined ask refuses it",
+                len(asked) == 1 and "192.0.2.77" in asked[0] and novel.is_error,
+                f"asked={asked!r} isError={novel.is_error} "
+                f"text={tool_text(novel)!r}",
+            )
+            # 4) A hostname NEVER seen in this engagement has no provenance
+            #    tying it to an authorized host, so it is not an alias and
+            #    must still be asked about.
+            unseen = await session.call_tool(
+                "register_target",
+                {"target": "unrelated.example.org", "session_dir": str(session_dir)},
+            )
+            check(
+                "a hostname never seen this session is NOT an alias and still "
+                "elicits (provenance, not merely being a name, is the signal)",
+                len(asked) == 2
+                and "unrelated.example.org" in asked[1]
+                and unseen.is_error,
+                f"asked={asked!r} isError={unseen.is_error} "
+                f"text={tool_text(unseen)!r}",
+            )
+
+
 async def check_warn_allows_and_logs(tmp_root: str) -> None:
     tmp_dir = tempfile.mkdtemp(dir=tmp_root, prefix="warn-")
     session_dir = make_session_dir(tmp_dir)
@@ -267,6 +375,7 @@ async def main() -> int:
     try:
         await check_enforce_denies_out_of_scope(tmp_root)
         await check_enforce_agent_token_reregister_is_in_scope(tmp_root)
+        await check_enforce_autodiscovered_host_does_not_elicit(tmp_root)
         await check_warn_allows_and_logs(tmp_root)
         await check_off_allows_silently(tmp_root)
         await check_default_mode_is_enforce(tmp_root)
