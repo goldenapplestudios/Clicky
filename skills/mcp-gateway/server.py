@@ -664,6 +664,20 @@ async def register_target(
     scope_path = _scope_path(session_dir)
     store = TokenStore(session_dir)
 
+    # Resolve an already-minted token back to its real value before scope-
+    # checking or (re-)registering. Dispatched agents are handed a token
+    # (e.g. "TARGET_1"), never the raw target, and every agent file tells
+    # them to call register_target on "the value you were given" - so an
+    # agent's call arrives as the token. Without this, scope_gate.classify()
+    # compares the literal string "TARGET_1" against a scope.json holding the
+    # real IP, gets NOT_LISTED, and (in enforce mode) fires an elicitation on
+    # the PRIMARY in-scope target - breaking the autonomous run. It would also
+    # make store.register() mint a second token for the literal "TARGET_1".
+    # resolve() substitutes only known tokens, so the orchestrator's raw-value
+    # call passes through unchanged; a genuinely-unknown token also passes
+    # through and is still (correctly) treated as an unlisted pivot.
+    target = store.resolve(target)
+
     mode = _scope_enforcement_mode()
 
     if mode == "off":

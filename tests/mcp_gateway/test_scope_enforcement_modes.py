@@ -118,6 +118,52 @@ async def check_enforce_denies_out_of_scope(tmp_root: str) -> None:
     )
 
 
+async def check_enforce_agent_token_reregister_is_in_scope(tmp_root: str) -> None:
+    """Regression: a dispatched agent re-registers using the TOKEN it was
+    handed (e.g. "TARGET_1"), not the raw target - every agent file tells it
+    to call register_target on "the value you were given," and the value it
+    was given is the token. register_target must resolve that token back to
+    its real value before scope-checking; otherwise classify() compares the
+    literal string "TARGET_1" against a scope.json holding the real IP, gets
+    NOT_LISTED, and fires an elicitation on the PRIMARY in-scope target -
+    breaking autonomous /pentest runs. elicit_should_not_be_called makes any
+    elicitation here a hard failure (that was the pre-fix behavior)."""
+    tmp_dir = tempfile.mkdtemp(dir=tmp_root, prefix="enforce-token-")
+    session_dir = make_session_dir(tmp_dir)
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_OPTION_SCOPE_ENFORCEMENT": "enforce",
+    }
+    params = StdioServerParameters(command=sys.executable, args=[SERVER_PATH], env=env)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(
+            read, write, elicitation_callback=elicit_should_not_be_called
+        ) as session:
+            await session.initialize()
+            # 1) Orchestrator registers the raw in-scope target -> TARGET_1.
+            first = await session.call_tool(
+                "register_target",
+                {"target": "203.0.113.10", "session_dir": str(session_dir)},
+            )
+            check(
+                "enforce mode: raw in-scope target registers (orchestrator path)",
+                not first.is_error and tool_text(first).strip() == "TARGET_1",
+                f"isError={first.is_error} text={tool_text(first)!r}",
+            )
+            # 2) A dispatched agent re-registers using the TOKEN it was handed.
+            #    Must resolve to the same in-scope value: same token back, no elicit.
+            second = await session.call_tool(
+                "register_target",
+                {"target": "TARGET_1", "session_dir": str(session_dir)},
+            )
+            check(
+                "enforce mode: re-registering with the token (agent path) stays "
+                "IN_SCOPE and returns the same token, without elicitation",
+                not second.is_error and tool_text(second).strip() == "TARGET_1",
+                f"isError={second.is_error} text={tool_text(second)!r}",
+            )
+
+
 async def check_warn_allows_and_logs(tmp_root: str) -> None:
     tmp_dir = tempfile.mkdtemp(dir=tmp_root, prefix="warn-")
     session_dir = make_session_dir(tmp_dir)
@@ -220,6 +266,7 @@ async def main() -> int:
     tmp_root = tempfile.mkdtemp(prefix="clicky-mcp-gateway-scope-modes-")
     try:
         await check_enforce_denies_out_of_scope(tmp_root)
+        await check_enforce_agent_token_reregister_is_in_scope(tmp_root)
         await check_warn_allows_and_logs(tmp_root)
         await check_off_allows_silently(tmp_root)
         await check_default_mode_is_enforce(tmp_root)
