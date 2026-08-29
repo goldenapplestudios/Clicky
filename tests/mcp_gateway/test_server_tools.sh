@@ -30,6 +30,7 @@ SCOPE_MODES_CHECK="$(dirname "${BASH_SOURCE[0]}")/test_scope_enforcement_modes.p
 TIMEOUT_CHECK="$(dirname "${BASH_SOURCE[0]}")/test_command_timeout.py"
 GATE_CHECK="$(dirname "${BASH_SOURCE[0]}")/test_technique_gate.py"
 LAZY_CHECK="$(dirname "${BASH_SOURCE[0]}")/test_toolchain_lazy.py"
+FETCH_SCOPE_CHECK="$(dirname "${BASH_SOURCE[0]}")/test_fetch_url_scope.py"
 
 command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not installed"; exit 0; }
 
@@ -64,6 +65,10 @@ echo "--- running test_toolchain_lazy.py (toolchain resolved lazily, never at st
 "$VENV_DIR/bin/python3" "$LAZY_CHECK" "$SERVER"
 LAZY_STATUS=$?
 
+echo "--- running test_fetch_url_scope.py (fetch_url scope + redirect enforcement, real HTTP servers) ---"
+"$VENV_DIR/bin/python3" "$FETCH_SCOPE_CHECK" "$SERVER"
+FETCH_SCOPE_STATUS=$?
+
 [ $LIVE_CHECK_STATUS -eq 0 ] && [ $SCOPE_MODES_STATUS -eq 0 ] && [ $TIMEOUT_STATUS -eq 0 ] \
-    && [ $GATE_STATUS -eq 0 ] && [ $LAZY_STATUS -eq 0 ]
+    && [ $GATE_STATUS -eq 0 ] && [ $LAZY_STATUS -eq 0 ] && [ $FETCH_SCOPE_STATUS -eq 0 ]
 exit $?

@@ -92,6 +92,7 @@ import threading
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -139,6 +140,9 @@ _toolchain_lock = threading.Lock()
 _toolchain_env: dict | None = None
 _toolchain_error: str | None = None
 _TOOLCHAIN_TIMEOUT_S = int(os.environ.get("CLICKY_TOOLCHAIN_TIMEOUT_S", "300"))
+
+# Redirect hops fetch_url will follow, each scope-checked before it is taken.
+_MAX_REDIRECTS = 6
 
 
 def _default_session_base() -> str:
@@ -472,6 +476,72 @@ def _credential_attack_gate(resolved: str, session_dir: str) -> str | None:
     )
 
 
+def _is_session_alias(value: str, store: TokenStore) -> bool:
+    """True if `value` is a hostname this engagement already learned.
+
+    The alias rule, shared by register_target and fetch_url so one
+    definition of "another name for an authorized host" serves both.
+    """
+    return _is_hostname(value) and store.existing_token(value) is not None
+
+
+def _url_scope_refusal(url: str, session_dir: str, store: TokenStore) -> str | None:
+    """Return a refusal message if `url`'s host is out of scope, else None.
+
+    OWASP APTS-SE-006 requires scope validation immediately before EVERY
+    network action - "Network connections... HTTP redirects: Before
+    following any redirect, validate destination is in scope" - and that
+    it be atomic: "if validation fails, the action is not taken". Until
+    now scope_gate was consulted only in register_target, so fetch_url
+    would happily follow a redirect to any host on the internet.
+
+    This is a real control but NOT a containment boundary: it inspects a
+    string the calling agent supplies, on the agent's side of the trust
+    line. A hard boundary has to sit where the agent's string cannot
+    reach it (an egress proxy or network-namespace firewall). See
+    docs/architecture.md.
+    """
+    mode = _scope_enforcement_mode()
+    if mode == "off":
+        return None
+
+    host = urlsplit(url).hostname or ""
+    if not host:
+        return f"[SCOPE] refusing to fetch a URL with no host: {url}"
+
+    # Another name for a host we are already authorized against.
+    if _is_session_alias(host, store):
+        return None
+
+    scope_path = _scope_path(session_dir)
+    try:
+        classification = scope_gate.classify(host, scope_path)
+    except Exception:
+        # Cannot establish scope -> treat as unproven, never as allowed.
+        classification = scope_gate.NOT_LISTED
+
+    if classification == scope_gate.IN_SCOPE:
+        return None
+
+    if mode == "warn":
+        _log_scope_event(
+            session_dir,
+            f"WARN mode - would have refused fetch of '{host}' "
+            f"({classification} per {scope_path})",
+        )
+        return None
+
+    _log_scope_event(
+        session_dir,
+        f"refused fetch of '{host}': {classification} per {scope_path}",
+    )
+    return (
+        f"[SCOPE] refusing to fetch '{host}': {classification} per "
+        f"{scope_path}. Register it with register_target first if it is "
+        f"genuinely in scope, or treat this as an authoritative negative."
+    )
+
+
 @mcp.tool()
 def create_session(target: str, objective: str = "", caller: str = "") -> dict:
     """Create a new Clicky session for `target` and return its session_dir/session_id.
@@ -678,13 +748,19 @@ async def register_target(
         hook's "ask" decision for Bash/WebFetch - see
         skills/target-validation/SKILL.md).
 
-    Any *unexpected* internal error while classifying or elicited (as
-    opposed to an explicit deny/decline, which is not an error) fails
-    open - the target is registered rather than the operator being locked
-    out - matching scope-enforcement-hook.sh's explicit fail-open design
-    principle: a scope gate that can lock an authorized operator out of a
-    fully-authorized engagement due to an internal bug is worse for
-    adoption than no gate.
+    Any *unexpected* internal error while classifying or eliciting fails
+    CLOSED - the target is refused, not registered. An earlier revision
+    failed open here, inheriting scope-enforcement-hook.sh's reasoning that
+    locking an authorized operator out is worse than no gate. That is wrong
+    for this path: the elicitation round trip itself raises on any MCP
+    2026-07-28 connection (server-initiated requests were replaced by
+    Multi Round-Trip Requests), so failing open disabled the scope gate
+    exactly when talking to a current-spec client. The MCP spec sanctions
+    no fail-open path, and OWASP APTS-SE-006 requires validation to be
+    atomic - "if validation fails, the action is not taken". The lockout
+    concern is addressed by making the common cases never reach here: the
+    primary target is IN_SCOPE, and names learned from the engagement are
+    aliases of an authorized host.
 
     Returns the minted or already-existing token (e.g. "TARGET_1").
     """
@@ -886,26 +962,48 @@ async def register_target(
         # below. Already traced at the raise points above.
         raise
     except Exception as exc:
-        # Fail open on any *unexpected* internal error (e.g. scope_gate
-        # or the elicitation round trip raising something other than the
-        # deliberate ValueErrors above) - see docstring.
+        # FAIL CLOSED. This previously registered the target unconditionally
+        # on any unexpected error, including the elicitation round trip
+        # itself raising - so a client that cannot elicit silently got every
+        # unlisted target approved. That is not a theoretical path: MCP
+        # revision 2026-07-28 removed server-initiated requests in favour of
+        # Multi Round-Trip Requests, and the Python SDK is explicit that on
+        # such a connection "there are no server-initiated requests, so these
+        # calls fail" - i.e. ctx.elicit() raises, and the scope gate would
+        # have disabled itself precisely when talking to a current-spec host.
+        #
+        # The MCP spec sanctions no fail-open path: its Key Principle is that
+        # "users must explicitly consent to and understand all data access and
+        # operations", and 2026-07-28 mandates the opposite behaviour outright
+        # - a server that needs a capability the client did not declare MUST
+        # return MissingRequiredClientCapabilityError (-32021) rather than
+        # proceed. Being unable to obtain consent is a reason to stop, never a
+        # reason to continue. OWASP APTS-SE-006 says the same for scope
+        # specifically: validation "MUST be atomic: if validation fails, the
+        # action is not taken."
+        #
+        # This costs little in practice: the primary target classifies
+        # IN_SCOPE and names learned from the engagement resolve as aliases,
+        # so neither reaches this path. Only a genuinely novel host does.
         _log_scope_event(
             session_dir,
-            f"internal error during scope check for target '{target}' "
-            f"({exc!r}) - failing open, registering unconditionally",
+            f"scope check for target '{target}' could not be completed "
+            f"({exc!r}) - refusing to register. Consent could not be "
+            f"established, so the target is NOT authorized.",
         )
-        token = store.register(target, "target")
-        # Safe to redact here - see the "off" branch above for why.
         _trace(
             session_dir,
-            event="tool_call",
+            event="tool_error",
             tool_name="register_target",
             caller=caller,
-            tool_input={"target": store.redact(target), "mode": mode},
-            tool_result=token,
-            error=f"internal error, failed open: {exc!r}",
+            tool_input={"target": "<refused, scope undetermined - not logged>", "mode": mode},
+            error=f"scope undetermined, failed closed: {exc!r}",
         )
-        return token
+        raise ValueError(
+            f"Scope for this target could not be determined ({exc!r}), and it "
+            f"was therefore NOT registered. This fails closed deliberately: "
+            f"an unverifiable scope is not an authorized one."
+        ) from exc
 
 
 # Prefer bash for command execution. shell=True with no executable= runs
@@ -1063,10 +1161,43 @@ def fetch_url(url: str, session_dir: str, caller: str = "") -> str:
     store = TokenStore(session_dir)
     resolved = store.resolve(url)
 
+    refusal = _url_scope_refusal(resolved, session_dir, store)
+    if refusal is not None:
+        redacted_refusal = store.redact(refusal)
+        _trace(
+            session_dir,
+            event="tool_error",
+            tool_name="fetch_url",
+            caller=caller,
+            tool_input={"url": url},
+            error=redacted_refusal,
+        )
+        return redacted_refusal
+
+    # Redirects are followed one hop at a time so each destination can be
+    # scope-checked before it is requested (APTS-SE-006). httpx's own
+    # follow_redirects=True would chase a Location: header to any host on
+    # the internet without ever consulting scope.
     try:
-        resp = httpx2.get(resolved, follow_redirects=True, timeout=30.0)
-        headers = "\n".join(f"{k}: {v}" for k, v in resp.headers.items())
-        output = f"[HTTP {resp.status_code}]\n{headers}\n\n{resp.text}"
+        current = resolved
+        output = "[ERROR] too many redirects"
+        for _ in range(_MAX_REDIRECTS):
+            resp = httpx2.get(current, follow_redirects=False, timeout=30.0)
+            location = resp.headers.get("location")
+            if resp.is_redirect and location:
+                nxt = urljoin(current, location)
+                hop_refusal = _url_scope_refusal(nxt, session_dir, store)
+                if hop_refusal is not None:
+                    output = (
+                        f"[HTTP {resp.status_code}] redirect NOT followed - "
+                        f"destination is out of scope.\n{hop_refusal}"
+                    )
+                    break
+                current = nxt
+                continue
+            headers = "\n".join(f"{k}: {v}" for k, v in resp.headers.items())
+            output = f"[HTTP {resp.status_code}]\n{headers}\n\n{resp.text}"
+            break
     except httpx2.HTTPError as e:
         output = f"[ERROR] {e}"
 
