@@ -82,6 +82,7 @@ over MCP, the same as any other client would.)
 """
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -196,7 +197,184 @@ def _validate_session_dir(session_dir: str) -> str:
 
 
 def _scope_path(session_dir: str) -> str:
+    """The session's ON-DISK scope file - agent-writable, NOT authoritative.
+
+    Kept because it is what an operator reads and edits, and what the
+    orchestrator writes. For any authorization decision use
+    _authoritative_scope_path() instead; see its docstring for why.
+    """
     return str(Path(session_dir) / "scope.json")
+
+
+# --- Locked scope -------------------------------------------------------
+#
+# Scope decides what may be attacked, so the party being constrained must not
+# be able to edit it. Every agent holds execute_command (an arbitrary shell)
+# and most hold write_file, and `session_dir/scope.json` was re-read from disk
+# on EVERY classification with no lock, hash or cache - so
+#     echo '{"targets":{"in_scope":["0.0.0.0/0"]}}' > $SESSION_DIR/scope.json
+# silently widened scope for every later check. The control lived inside the
+# blast radius of the thing it constrains.
+#
+# The scope in force is therefore copied once, to a directory outside
+# session_dir, and every classification reads that copy. The on-disk file
+# stays visible and editable - an edit is simply inert, and is reported as a
+# tamper event rather than silently obeyed.
+#
+# OWASP APTS MR-012 (scope immutable after initialization), MR-023 (deny the
+# agent the ability to modify safety controls), AR-020 (audit reconstructable
+# without agent-written data). XBOW states the same invariant operationally:
+# "the scope is locked at launch, meaning there is no runtime path for the
+# agent to expand its own scope."
+def _locked_scope_dir() -> Path:
+    base = os.environ.get("CLAUDE_PLUGIN_DATA", "/tmp/clicky-mcp-gateway-data")
+    return Path(base) / "locked-scope"
+
+
+def _locked_scope_file(session_dir: str) -> Path:
+    """Where this session's locked scope copy lives.
+
+    Keyed by the session directory's own identity, not by a caller-supplied
+    name, so one session can never address another's locked scope.
+    """
+    key = hashlib.sha256(str(Path(session_dir).resolve()).encode()).hexdigest()[:32]
+    return _locked_scope_dir() / f"{key}.json"
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def _authoritative_scope_path(session_dir: str) -> str:
+    """Return the path to the scope that decisions must be made against.
+
+    Locks the scope on first use: the first classification of a session
+    copies whatever scope is in force to the locked directory, and every
+    later call reads that copy. If the on-disk file has since changed, the
+    divergence is logged as a tamper event and the LOCKED copy still wins.
+
+    Falls back to the on-disk path only if the locked copy cannot be created
+    (e.g. an unwritable plugin-data directory) - that is a degradation worth
+    seeing in the log rather than a reason to refuse the engagement, and it
+    is no worse than the previous behaviour.
+    """
+    on_disk = Path(_scope_path(session_dir))
+    locked = _locked_scope_file(session_dir)
+
+    try:
+        if locked.is_file():
+            if on_disk.is_file():
+                live = on_disk.read_text(errors="replace")
+                if _digest(live) != _digest(locked.read_text(errors="replace")):
+                    _log_scope_event(
+                        session_dir,
+                        "TAMPER: session scope.json differs from the scope locked "
+                        "at session start. The locked scope remains in force; the "
+                        "on-disk edit has NO effect on authorization. Start a new "
+                        "session to test a different scope.",
+                    )
+            return str(locked)
+
+        if not on_disk.is_file():
+            # Nothing to lock yet. Caller gets the (absent) on-disk path and
+            # scope_gate treats an unreadable scope as NOT_LISTED, never as
+            # a silent allow.
+            return str(on_disk)
+
+        locked.parent.mkdir(parents=True, exist_ok=True)
+        content = on_disk.read_text(errors="replace")
+        tmp = locked.with_suffix(".tmp")
+        tmp.write_text(content)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, locked)
+        # Deliberately NOT written to scope-enforcement.log: that log is for
+        # decisions and deviations (a deny, a warn-mode would-have-denied, a
+        # tamper), and existing behaviour asserts it stays absent on a clean
+        # deny and in "off" mode. Locking is routine bookkeeping.
+        return str(locked)
+    except OSError as exc:
+        _log_scope_event(
+            session_dir,
+            f"could not lock scope ({exc!r}) - falling back to the "
+            f"session-local scope.json, which the agent can write",
+        )
+        return str(on_disk)
+
+
+# Session subtrees an agent may write. Everything else under session_dir is
+# engagement control state or audit record: `state/` holds the attack tree,
+# coverage ledger and technique authorizations (the credential-attack gate),
+# `logs/` holds the trace that must be reconstructable without agent-written
+# data (APTS AR-020), and scope.json / .token-map.json are the authorization
+# and privacy substrate themselves.
+#
+# NOTE the residual, stated rather than glossed: this confines write_file
+# only. execute_command is an arbitrary shell and can still write anywhere
+# the user can until the Phase 2 sandbox mounts these read-only. The locked
+# scope above is what makes that residual non-fatal for authorization
+# specifically - a shell that rewrites scope.json changes nothing.
+# Protected by category rather than by allow-listing every output location:
+# an allowlist of known subdirectories refused legitimate writes (a note at
+# the session root, for one) and would refuse any new output location a later
+# skill introduces. New CONTROL state must therefore be added under state/ or
+# logs/ - that is the invariant this list encodes.
+_PROTECTED_SUBDIRS = ("state", "logs")
+_PROTECTED_FILES = ("scope.json", ".token-map.json")
+
+# Never readable through the gateway, whatever path is asked for.
+_NEVER_READ = (".token-map.json",)
+
+
+def _confine_write_path(resolved_path: str, session_dir: str) -> str | None:
+    """Return a refusal message if `resolved_path` is not agent-writable.
+
+    Compares fully-resolved paths so `..` traversal and symlinks cannot walk
+    out of the permitted subtrees.
+    """
+    session_root = Path(session_dir).resolve()
+    # resolve(strict=False): the file usually does not exist yet.
+    target = Path(resolved_path).resolve()
+
+    try:
+        rel = target.relative_to(session_root)
+    except ValueError:
+        return (
+            f"[REFUSED] write outside the session directory is not permitted "
+            f"({target}). Engagement output belongs under {session_root}."
+        )
+
+    top = rel.parts[0] if rel.parts else ""
+    if top in _PROTECTED_SUBDIRS:
+        return (
+            f"[REFUSED] '{rel}' is engagement control state or the audit "
+            f"record, which the agent being audited must not write "
+            f"(protected: {', '.join(_PROTECTED_SUBDIRS)}/)."
+        )
+    if target.name in _PROTECTED_FILES:
+        return (
+            f"[REFUSED] '{target.name}' is part of the authorization or "
+            f"privacy substrate and is not agent-writable. Editing it would "
+            f"not change authorization in any case - the scope in force is "
+            f"locked outside this directory."
+        )
+    return None
+
+
+def _confine_read_path(resolved_path: str) -> str | None:
+    """Return a refusal message if `resolved_path` must never be read.
+
+    Deliberately narrow. Output redaction already rewrites real values back
+    to tokens on the way out - a private key read through here comes back as
+    CRED_KEY_n - so reads are far less dangerous than writes. The one thing
+    redaction cannot protect is the token map itself, which is the mapping.
+    """
+    name = Path(resolved_path).name
+    if name in _NEVER_READ:
+        return (
+            f"[REFUSED] {name} is the session's token map - the one file whose "
+            f"contents are the real values behind every token."
+        )
+    return None
 
 
 _SCOPE_ENFORCEMENT_MODES = ("enforce", "warn", "off")
@@ -513,7 +691,7 @@ def _url_scope_refusal(url: str, session_dir: str, store: TokenStore) -> str | N
     if _is_session_alias(host, store):
         return None
 
-    scope_path = _scope_path(session_dir)
+    scope_path = _authoritative_scope_path(session_dir)
     try:
         classification = scope_gate.classify(host, scope_path)
     except Exception:
@@ -765,7 +943,6 @@ async def register_target(
     Returns the minted or already-existing token (e.g. "TARGET_1").
     """
     session_dir = _validate_session_dir(session_dir)
-    scope_path = _scope_path(session_dir)
     store = TokenStore(session_dir)
 
     # Resolve an already-minted token back to its real value before scope-
@@ -802,6 +979,12 @@ async def register_target(
             tool_result=token,
         )
         return token
+
+    # Resolved only now, after the "off" early-return above: in "off" mode
+    # scope checking is skipped ENTIRELY, so the session's scope must not even
+    # be locked or read - test_scope_enforcement_modes.py asserts that mode
+    # leaves no scope-enforcement.log behind at all.
+    scope_path = _authoritative_scope_path(session_dir)
 
     try:
         classification = scope_gate.classify(target, scope_path)
@@ -1225,6 +1408,19 @@ def read_file(path: str, session_dir: str, caller: str = "") -> str:
     store = TokenStore(session_dir)
     resolved_path = store.resolve(path)
 
+    refusal = _confine_read_path(resolved_path)
+    if refusal is not None:
+        redacted = store.redact(refusal)
+        _trace(
+            session_dir,
+            event="tool_error",
+            tool_name="read_file",
+            caller=caller,
+            tool_input={"path": path},
+            error=redacted,
+        )
+        return redacted
+
     try:
         content = Path(resolved_path).read_text(errors="replace")
     except OSError as e:
@@ -1269,6 +1465,19 @@ def write_file(path: str, content: str, session_dir: str, caller: str = "") -> s
     store = TokenStore(session_dir)
     resolved_path = store.resolve(path)
     resolved_content = store.resolve(content)
+
+    refusal = _confine_write_path(resolved_path, session_dir)
+    if refusal is not None:
+        redacted = store.redact(refusal)
+        _trace(
+            session_dir,
+            event="tool_error",
+            tool_name="write_file",
+            caller=caller,
+            tool_input={"path": path},
+            error=redacted,
+        )
+        return redacted
 
     try:
         p = Path(resolved_path)
